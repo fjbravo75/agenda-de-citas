@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% load static %}
+{% now "Y" as current_year %}
+
+{% block body_class %}theme-root theme-app{% endblock %}
+
+{% block site %}
+<header class="site-header site-header--app">
+    <div class="shell shell--app header-row">
+        <a class="brand" href="/app/">
+            <span class="brand__mark brand__mark--accent">AC</span>
+            <span class="brand__meta">
+                <span class="brand__name">Agenda de Citas</span>
+                <span class="brand__subtle">Agenda operativa interna</span>
+            </span>
+        </a>
+        <nav class="nav-cluster" aria-label="Navegacion interna">
+            <a class="nav-link{% if request.path == '/app/' %} is-active{% endif %}" href="/app/">Agenda</a>
+            <a class="nav-link{% if request.path == '/app/ui/' %} is-active{% endif %}" href="/app/ui/">UI</a>
+            <a class="nav-link{% if request.path == '/app/calendar-ui/' %} is-active{% endif %}" href="/app/calendar-ui/">Mock</a>
+            <a class="nav-link" href="/">CMS</a>
+        </nav>
+    </div>
+</header>
+
+<main class="site-main">
+    <div class="shell shell--app">
+        {% block layout_intro %}{% endblock %}
+        {% block content %}{% endblock %}
+    </div>
+</main>
+
+<footer class="site-footer site-footer--app">
+    <div class="shell shell--app footer-row">
+        <div class="footer-row__meta">
+            <p class="footer-title">Base visual compartida</p>
+            <p class="footer-copy">Base comun para CMS y app interna, con la agenda principal ya montada en fase estructural.</p>
+        </div>
+        <div class="footer-row__aside">
+            <div class="footer-links">
+                <a class="footer-link" href="/app/">Agenda</a>
+                <a class="footer-link" href="/app/ui/">UI</a>
+                <a class="footer-link" href="/app/calendar-ui/">Mock</a>
+                <a class="footer-link" href="/">CMS</a>
+            </div>
+            <p class="footer-copy">Agenda de Citas {{ current_year }}</p>
+        </div>
+    </div>
+</footer>
+{% endblock %}

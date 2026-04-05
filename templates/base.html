@@ -1,18 +1,19 @@
 {% load static %}
 <!doctype html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
     <title>{% block title %}Agenda de Citas{% endblock %}</title>
     <link rel="stylesheet" href="{% static 'css/base.css' %}">
     {% block extra_head %}{% endblock %}
 </head>
-<body class="{% block body_class %}app-shell{% endblock %}">
-    <main>
-        {% block content %}{% endblock %}
-    </main>
-    <script src="{% static 'js/app.js' %}"></script>
+<body class="{% block body_class %}theme-root{% endblock %}">
+    <div class="site-shell">
+        {% block site %}{% endblock %}
+    </div>
+    <script src="{% static 'js/app.js' %}" defer></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

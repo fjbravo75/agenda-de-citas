@@ -1,0 +1,272 @@
+{% extends "base_app.html" %}
+
+{% block title %}Validacion Visual | Agenda de Citas{% endblock %}
+
+{% block layout_intro %}
+<section class="hero-block hero-block--app">
+    <div class="hero-grid">
+        <div class="hero-copy">
+            <p class="eyebrow">Validacion visual interna</p>
+            <h1>Base visual compartida</h1>
+            <p class="lede">Pagina de comprobacion para revisar la base compartida con menos cajas, mas lectura de producto real y una escena estatica adicional para el calendario.</p>
+        </div>
+        <div class="hero-panel">
+            <p class="hero-panel__label">Resumen del sistema</p>
+            <div class="chip-row">
+                <a class="chip chip--interactive" href="#tipografia">Tipografia</a>
+                <a class="chip chip--interactive" href="#controles">Controles</a>
+                <a class="chip chip--interactive" href="#estados">Estados</a>
+                <a class="chip chip--interactive" href="#composicion">Composicion</a>
+            </div>
+            <div class="hero-metrics">
+                <div class="hero-metric">
+                    <span>Layouts base</span>
+                    <strong>02</strong>
+                </div>
+                <div class="hero-metric">
+                    <span>Rutas validadas</span>
+                    <strong>04</strong>
+                </div>
+                <div class="hero-metric">
+                    <span>Nuevo foco</span>
+                    <strong>Calendario</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block content %}
+<section class="section-stack">
+    <article class="section-surface section-surface--subtle">
+        <p class="eyebrow">Lectura general</p>
+        <h2>La pagina valida sistema, no un catalogo de cajas</h2>
+        <p>Se mantienen cards donde aportan estructura real, pero la composicion respira mas como producto y menos como una coleccion de bloques aislados. Header y footer reales quedan visibles como parte de la prueba.</p>
+        <div class="button-row">
+            <a class="button button--primary" href="/app/calendar-ui/">Ver calendario mock</a>
+            <a class="button button--secondary" href="/app/">Volver a base</a>
+        </div>
+    </article>
+</section>
+
+<section class="section-stack" id="tipografia">
+    <div class="section-heading">
+        <p class="eyebrow">1. Tipografia y color</p>
+        <h2>Jerarquia clara y paleta fria-neutra</h2>
+    </div>
+    <div class="validation-grid">
+        <article class="editorial-block">
+            <h1>Titulo principal de referencia</h1>
+            <p class="text-secondary">Texto secundario para explicar un contexto sin disputar el foco a la accion principal.</p>
+            <h2>Subtitulo operativo</h2>
+            <p>El sistema usa una voz calma, tecnica y profesional para introducir contenido y acciones.</p>
+            <h3>Tercer nivel</h3>
+            <p><a href="/app/">Enlace base</a> con acento azul elegante y comportamiento discreto.</p>
+        </article>
+        <article class="card">
+            <div class="swatch-grid">
+                <div class="swatch">
+                    <span class="swatch__tone swatch__tone--bg"></span>
+                    <strong>Fondo</strong>
+                    <span>Base fria y luminosa</span>
+                </div>
+                <div class="swatch">
+                    <span class="swatch__tone swatch__tone--surface"></span>
+                    <strong>Superficie</strong>
+                    <span>Paneles y cards</span>
+                </div>
+                <div class="swatch">
+                    <span class="swatch__tone swatch__tone--accent"></span>
+                    <strong>Acento</strong>
+                    <span>Acciones y estados focales</span>
+                </div>
+                <div class="swatch">
+                    <span class="swatch__tone swatch__tone--muted"></span>
+                    <strong>Texto secundario</strong>
+                    <span>Contexto y soporte</span>
+                </div>
+            </div>
+        </article>
+    </div>
+</section>
+
+<section class="section-stack" id="controles">
+    <div class="section-heading">
+        <p class="eyebrow">2. Controles y formularios</p>
+        <h2>Jerarquia sobria de interacciones</h2>
+    </div>
+    <article class="section-surface">
+        <div class="button-row">
+            <a class="button button--primary" href="#composicion">Accion primaria</a>
+            <button class="button button--secondary" type="button">Secundaria</button>
+            <button class="button button--ghost" type="button">Ghost</button>
+            <button class="button button--danger" type="button">Danger</button>
+        </div>
+    </article>
+    <article class="card">
+        <form class="form-grid" action="#" method="get">
+            <div class="field">
+                <label for="client-name">Input text</label>
+                <input id="client-name" name="client_name" type="text" placeholder="Nombre del cliente">
+                <p class="help-text">Usar nombres reales ayudara a revisar densidad y legibilidad.</p>
+            </div>
+            <div class="field">
+                <label for="search-day">Input search</label>
+                <input id="search-day" name="search_day" type="search" placeholder="Buscar cita o cliente">
+            </div>
+            <div class="field">
+                <label for="appointment-date">Input date</label>
+                <input id="appointment-date" name="appointment_date" type="date" value="2026-04-07">
+            </div>
+            <div class="field">
+                <label for="appointment-time">Input time</label>
+                <input id="appointment-time" name="appointment_time" type="time" value="10:30">
+            </div>
+            <div class="field">
+                <label for="service-type">Select</label>
+                <select id="service-type" name="service_type">
+                    <option selected>Seguimiento presencial</option>
+                    <option>Revision corta</option>
+                    <option>Llamada confirmacion</option>
+                </select>
+            </div>
+            <div class="field field--full">
+                <label for="notes">Textarea</label>
+                <textarea id="notes" name="notes" rows="4" placeholder="Notas internas de preparacion"></textarea>
+                <p class="error-text">Ejemplo de texto de error: revisa que la duracion propuesta no choque con otra cita.</p>
+            </div>
+            <div class="field field--full">
+                <div class="choice-row">
+                    <label class="choice">
+                        <input type="checkbox" checked>
+                        <span>Enviar recordatorio automatico</span>
+                    </label>
+                    <label class="choice">
+                        <input type="radio" name="mode" checked>
+                        <span>Presencial</span>
+                    </label>
+                    <label class="choice">
+                        <input type="radio" name="mode">
+                        <span>Remoto</span>
+                    </label>
+                </div>
+            </div>
+        </form>
+    </article>
+</section>
+
+<section class="section-stack" id="estados">
+    <div class="section-heading">
+        <p class="eyebrow">3. Estados y tabla</p>
+        <h2>Senales calmadas y legibles</h2>
+    </div>
+    <div class="card-grid card-grid--two">
+        <article class="card">
+            <div class="stack-sm">
+                <div class="alert alert--info">Info: la agenda visual compartida esta preparada para pruebas de interfaz.</div>
+                <div class="alert alert--success">Success: la estructura base ya responde de forma consistente.</div>
+                <div class="alert alert--warning">Warning: la base visual compartida aun no incluye componentes funcionales reales.</div>
+                <div class="alert alert--danger">Danger: este estado solo ilustra tono visual, no un error de negocio.</div>
+            </div>
+        </article>
+        <article class="card">
+            <div class="badge-row">
+                <span class="badge badge--pending">Pendiente</span>
+                <span class="badge badge--confirmed">Confirmada</span>
+                <span class="badge badge--cancelled">Cancelada</span>
+                <span class="badge badge--completed">Completada</span>
+                <span class="badge badge--missed">No asistio</span>
+            </div>
+        </article>
+        <article class="card">
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Hora</th>
+                            <th>Cliente</th>
+                            <th>Servicio</th>
+                            <th>Estado</th>
+                            <th>Canal</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>09:30</td>
+                            <td>Marta Leon</td>
+                            <td>Seguimiento presencial</td>
+                            <td><span class="badge badge--confirmed">Confirmada</span></td>
+                            <td>Cabina 2</td>
+                        </tr>
+                        <tr>
+                            <td>10:45</td>
+                            <td>Daniel Rios</td>
+                            <td>Revision corta</td>
+                            <td><span class="badge badge--pending">Pendiente</span></td>
+                            <td>Online</td>
+                        </tr>
+                        <tr>
+                            <td>12:15</td>
+                            <td>Laura Vega</td>
+                            <td>Llamada de control</td>
+                            <td><span class="badge badge--completed">Completada</span></td>
+                            <td>Telefono</td>
+                        </tr>
+                        <tr>
+                            <td>16:00</td>
+                            <td>Alberto Cano</td>
+                            <td>Primera valoracion</td>
+                            <td><span class="badge badge--cancelled">Cancelada</span></td>
+                            <td>Cabina 1</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </article>
+    </div>
+</section>
+
+<section class="section-stack" id="composicion">
+    <div class="section-heading">
+        <p class="eyebrow">4. Composicion realista</p>
+        <h2>Una escena de producto sin backend real</h2>
+    </div>
+    <div class="dashboard-grid">
+        <article class="section-surface">
+            <p class="eyebrow">Escena base</p>
+            <h3>Un bloque abierto para lectura operativa</h3>
+            <p>La composicion ya puede enseñar una escena de producto sin convertir cada pieza en una tarjeta. El mock de calendario lleva ese criterio un paso mas lejos y lo aplica al nucleo visual real.</p>
+            <div class="summary-strip summary-strip--three">
+                <article class="summary-strip__item">
+                    <p class="summary-strip__label">Hoy</p>
+                    <strong class="summary-strip__value">08</strong>
+                    <p class="summary-strip__meta">citas previstas</p>
+                </article>
+                <article class="summary-strip__item">
+                    <p class="summary-strip__label">Confirmadas</p>
+                    <strong class="summary-strip__value">05</strong>
+                    <p class="summary-strip__meta">con lectura sobria</p>
+                </article>
+                <article class="summary-strip__item">
+                    <p class="summary-strip__label">Disponibilidad</p>
+                    <strong class="summary-strip__value">03</strong>
+                    <p class="summary-strip__meta">huecos libres</p>
+                </article>
+            </div>
+        </article>
+        <article class="card">
+            <div class="card__header">
+                <h3>Mock de calendario</h3>
+                <a href="/app/calendar-ui/">Abrir</a>
+            </div>
+            <p class="text-secondary">Nueva superficie estatica para validar calendario mensual, resumen diario y proximas acciones sin backend real.</p>
+            <ul class="simple-list">
+                <li>mes visible como protagonista</li>
+                <li>detalle diario con citas y huecos</li>
+                <li>lectura profesional sin adornos</li>
+            </ul>
+        </article>
+    </div>
+</section>
+{% endblock %}

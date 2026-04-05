@@ -1,0 +1,338 @@
+{% extends "base_app.html" %}
+
+{% block title %}Calendario Mock | Agenda de Citas{% endblock %}
+
+{% block content %}
+<section class="section-stack">
+    <header class="page-header">
+        <div class="page-header__copy">
+            <p class="eyebrow">Calendario mock</p>
+            <h1>Agenda</h1>
+            <p class="page-header__text">Validacion estatica del calendario mensual y del resumen diario, sin backend real ni dependencia de modelos.</p>
+        </div>
+        <div class="page-actions">
+            <a class="button button--secondary" href="/app/ui/">Volver a UI</a>
+            <a class="button button--ghost" href="/app/">Base</a>
+        </div>
+    </header>
+</section>
+
+<section class="section-stack">
+    <div class="summary-strip">
+        <article class="summary-strip__item">
+            <p class="summary-strip__label">Citas hoy</p>
+            <strong class="summary-strip__value">04</strong>
+            <p class="summary-strip__meta">agenda prevista hasta las 17:00</p>
+        </article>
+        <article class="summary-strip__item">
+            <p class="summary-strip__label">Huecos libres</p>
+            <strong class="summary-strip__value">02</strong>
+            <p class="summary-strip__meta">11:00 a 12:00 y 16:00 a 17:00</p>
+        </article>
+        <article class="summary-strip__item">
+            <p class="summary-strip__label">Proximas confirmadas</p>
+            <strong class="summary-strip__value">03</strong>
+            <p class="summary-strip__meta">incluyendo la apertura de las 09:00</p>
+        </article>
+        <article class="summary-strip__item">
+            <p class="summary-strip__label">Bloqueos activos</p>
+            <strong class="summary-strip__value">01</strong>
+            <p class="summary-strip__meta">parcial manana por la tarde</p>
+        </article>
+    </div>
+</section>
+
+<section class="section-stack">
+    <div class="calendar-layout">
+        <article class="calendar-board">
+            <div class="calendar-toolbar">
+                <div class="calendar-toolbar__copy">
+                    <p class="eyebrow">Vista mensual</p>
+                    <h2>Abril 2026</h2>
+                    <p class="text-secondary">Simulacion visual del nucleo de agenda, con lectura clara de ocupacion y disponibilidad.</p>
+                </div>
+                <div class="calendar-nav" aria-label="Controles estaticos de calendario">
+                    <button class="button button--secondary" type="button">Anterior</button>
+                    <button class="button button--secondary" type="button">Siguiente</button>
+                </div>
+            </div>
+            <div class="calendar-weekdays">
+                <div class="calendar-weekday">Lun</div>
+                <div class="calendar-weekday">Mar</div>
+                <div class="calendar-weekday">Mie</div>
+                <div class="calendar-weekday">Jue</div>
+                <div class="calendar-weekday">Vie</div>
+                <div class="calendar-weekday">Sab</div>
+                <div class="calendar-weekday">Dom</div>
+            </div>
+            <div class="calendar-grid">
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">30</span>
+                </div>
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">31</span>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">1</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note calendar-note--strong">2 citas</span>
+                        <span class="calendar-note">bloque de manana libre</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">2</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note calendar-note--strong">4 citas</span>
+                        <span class="calendar-note">ocupacion alta</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">3</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">1 cita</span>
+                    </div>
+                </div>
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">4</span>
+                </div>
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">5</span>
+                </div>
+
+                <div class="calendar-cell">
+                    <span class="calendar-day">6</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">2 citas</span>
+                    </div>
+                </div>
+                <div class="calendar-cell calendar-cell--today">
+                    <span class="calendar-day">7</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note calendar-note--strong">4 citas</span>
+                        <span class="calendar-note">09:00 Marta Leon</span>
+                        <span class="calendar-note">17:00 Lucia Gomez</span>
+                    </div>
+                </div>
+                <div class="calendar-cell calendar-cell--blocked">
+                    <span class="calendar-day">8</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">2 citas</span>
+                        <span class="calendar-note calendar-note--blocked">bloqueo parcial 16:00</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">9</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">1 cita</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">10</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note calendar-note--strong">3 citas</span>
+                    </div>
+                </div>
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">11</span>
+                </div>
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">12</span>
+                </div>
+
+                <div class="calendar-cell">
+                    <span class="calendar-day">13</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">1 cita</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">14</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note calendar-note--strong">4 citas</span>
+                        <span class="calendar-note">ocupacion alta</span>
+                    </div>
+                </div>
+                <div class="calendar-cell calendar-cell--blocked">
+                    <span class="calendar-day">15</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">2 citas</span>
+                        <span class="calendar-note calendar-note--blocked">bloqueo parcial 11:30</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">16</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">1 cita</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">17</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note calendar-note--strong">3 citas</span>
+                    </div>
+                </div>
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">18</span>
+                </div>
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">19</span>
+                </div>
+
+                <div class="calendar-cell">
+                    <span class="calendar-day">20</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">2 citas</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">21</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note calendar-note--strong">5 citas</span>
+                        <span class="calendar-note">ocupacion muy alta</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">22</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">2 citas</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">23</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">1 cita</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">24</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note calendar-note--strong">3 citas</span>
+                    </div>
+                </div>
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">25</span>
+                </div>
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">26</span>
+                </div>
+
+                <div class="calendar-cell">
+                    <span class="calendar-day">27</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">2 citas</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">28</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">1 cita</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">29</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note calendar-note--strong">4 citas</span>
+                    </div>
+                </div>
+                <div class="calendar-cell">
+                    <span class="calendar-day">30</span>
+                    <div class="calendar-notes">
+                        <span class="calendar-note">2 citas</span>
+                    </div>
+                </div>
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">1</span>
+                </div>
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">2</span>
+                </div>
+                <div class="calendar-cell calendar-cell--muted">
+                    <span class="calendar-day">3</span>
+                </div>
+            </div>
+        </article>
+
+        <div class="detail-stack">
+            <aside class="detail-panel">
+                <div class="detail-panel__section">
+                    <p class="eyebrow">Hoy</p>
+                    <h3>Martes 7 de abril</h3>
+                    <p class="text-secondary">Horario base 09:00 a 18:00</p>
+                </div>
+
+                <div class="detail-panel__section">
+                    <p class="detail-panel__label">Citas del dia</p>
+                    <div class="agenda-list">
+                        <article class="agenda-item">
+                            <div class="agenda-item__top">
+                                <span class="agenda-item__time">09:00</span>
+                                <span class="status-label status-label--confirmed">Confirmada</span>
+                            </div>
+                            <strong class="agenda-item__name">Marta Leon</strong>
+                            <span class="agenda-item__service">Fisioterapia inicial</span>
+                        </article>
+                        <article class="agenda-item">
+                            <div class="agenda-item__top">
+                                <span class="agenda-item__time">10:00</span>
+                                <span class="status-label status-label--completed">Completada</span>
+                            </div>
+                            <strong class="agenda-item__name">Carlos Ruiz</strong>
+                            <span class="agenda-item__service">Revision</span>
+                        </article>
+                        <article class="agenda-item">
+                            <div class="agenda-item__top">
+                                <span class="agenda-item__time">12:30</span>
+                                <span class="status-label status-label--pending">Pendiente</span>
+                            </div>
+                            <strong class="agenda-item__name">Ana Perez</strong>
+                            <span class="agenda-item__service">Sesion de seguimiento</span>
+                        </article>
+                        <article class="agenda-item">
+                            <div class="agenda-item__top">
+                                <span class="agenda-item__time">17:00</span>
+                                <span class="status-label status-label--confirmed">Confirmada</span>
+                            </div>
+                            <strong class="agenda-item__name">Lucia Gomez</strong>
+                            <span class="agenda-item__service">Evaluacion</span>
+                        </article>
+                    </div>
+                </div>
+
+                <div class="detail-panel__section">
+                    <p class="detail-panel__label">Huecos libres</p>
+                    <div class="free-slot-list">
+                        <div class="free-slot">
+                            <span>11:00 a 12:00</span>
+                            <strong>Disponible</strong>
+                        </div>
+                        <div class="free-slot">
+                            <span>16:00 a 17:00</span>
+                            <strong>Disponible</strong>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <aside class="detail-panel">
+                <div class="detail-panel__section">
+                    <p class="detail-panel__label">Proximas acciones</p>
+                    <div class="action-list">
+                        <div class="action-item">
+                            <span>Proxima cita</span>
+                            <strong>09:00 Marta Leon</strong>
+                        </div>
+                        <div class="action-item">
+                            <span>Proximo hueco libre</span>
+                            <strong>11:00 a 12:00</strong>
+                        </div>
+                        <div class="action-item">
+                            <span>Manana</span>
+                            <strong>Bloqueo parcial 16:00</strong>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+</section>
+{% endblock %}

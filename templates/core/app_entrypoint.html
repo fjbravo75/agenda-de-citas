@@ -18,7 +18,8 @@
         </header>
     </section>
 
-    <section class="section-stack">
+    <section id="agenda-interactive-region" class="section-stack">
+        <p class="eyebrow agenda-context-strip__context">{{ today_context_label }}</p>
         <div class="summary-strip agenda-context-strip">
             {% for metric in agenda_metrics %}
             <article class="summary-strip__item">
@@ -28,82 +29,10 @@
             </article>
             {% endfor %}
         </div>
-    </section>
 
-    <section class="section-stack">
         <div class="agenda-layout">
-            <article class="agenda-month">
-                <div class="agenda-month__header">
-                    <h2>Abril 2026</h2>
-                    <nav class="agenda-month__nav" aria-label="Navegacion visual del mes">
-                        <span class="agenda-month__nav-link">Anterior</span>
-                        <span class="agenda-month__nav-separator">&middot;</span>
-                        <span class="agenda-month__nav-link">Siguiente</span>
-                    </nav>
-                </div>
-
-                <div class="agenda-month__weekdays" aria-hidden="true">
-                    <span class="agenda-month__weekday">Lun</span>
-                    <span class="agenda-month__weekday">Mar</span>
-                    <span class="agenda-month__weekday">Mie</span>
-                    <span class="agenda-month__weekday">Jue</span>
-                    <span class="agenda-month__weekday">Vie</span>
-                    <span class="agenda-month__weekday">Sab</span>
-                    <span class="agenda-month__weekday">Dom</span>
-                </div>
-
-                <div class="agenda-month__grid agenda-month__grid--weeks-{{ agenda_weeks|length }}">
-                    {% for week in agenda_weeks %}
-                        {% for day in week %}
-                        <article class="agenda-day{% if day.outside %} agenda-day--outside{% endif %}{% if day.today %} agenda-day--today{% endif %}{% if day.selected %} agenda-day--selected{% endif %}">
-                            <div class="agenda-day__top">
-                                <span class="agenda-day__number">{{ day.number }}</span>
-                            </div>
-                            <div class="agenda-day__markers">
-                                {% for marker in day.markers %}
-                                <span class="agenda-day__marker{% if marker.kind %} agenda-day__marker--{{ marker.kind }}{% endif %}">{{ marker.label }}</span>
-                                {% endfor %}
-                            </div>
-                        </article>
-                        {% endfor %}
-                    {% endfor %}
-                </div>
-            </article>
-
-            <aside class="agenda-panel">
-                <div class="agenda-panel__section">
-                    <p class="eyebrow agenda-panel__eyebrow">Dia seleccionado</p>
-                    <h3 class="agenda-panel__date">{{ selected_day_title }}</h3>
-                    <p class="text-secondary agenda-panel__summary">{{ selected_day_summary }}</p>
-                </div>
-
-                <div class="agenda-timeline" aria-label="Timeline fija del dia seleccionado">
-                    {% for slot in agenda_timeline_slots %}
-                    <article class="agenda-slot{% if slot.blocked_label %} agenda-slot--blocked{% endif %}">
-                        <div class="agenda-slot__time">{{ slot.time }}</div>
-                        <div class="agenda-slot__content">
-                            {% if slot.entries %}
-                            <div class="agenda-slot__entries">
-                                {% for entry in slot.entries %}
-                                <div class="agenda-slot__entry">
-                                    <span class="agenda-slot__entry-main">
-                                        <span class="agenda-slot__entry-name">{{ entry.name }}</span>
-                                        <span class="agenda-slot__entry-service">{{ entry.service }}</span>
-                                    </span>
-                                    <span class="agenda-slot__entry-status agenda-slot__entry-status--{{ entry.status_key }}">{{ entry.status }}</span>
-                                </div>
-                                {% endfor %}
-                            </div>
-                            {% elif slot.blocked_label %}
-                            <span class="agenda-slot__state agenda-slot__state--blocked">{{ slot.blocked_label }}</span>
-                            {% else %}
-                            <span class="agenda-slot__state agenda-slot__state--empty" aria-hidden="true"></span>
-                            {% endif %}
-                        </div>
-                    </article>
-                    {% endfor %}
-                </div>
-            </aside>
+            {% include "core/_agenda_month.html" %}
+            {% include "core/_agenda_day_panel.html" %}
         </div>
     </section>
 </div>

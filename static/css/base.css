@@ -904,6 +904,10 @@ h3 {
     margin-bottom: 16px;
 }
 
+.agenda-context-strip__context {
+    margin: 0 0 6px 0;
+}
+
 .agenda-layout {
     display: grid;
     grid-template-columns: minmax(0, 2.1fr) minmax(320px, 0.9fr);
@@ -952,6 +956,7 @@ h3 {
 .agenda-month__nav-link {
     color: var(--color-text-muted);
     font-weight: 600;
+    text-decoration: none;
 }
 
 .agenda-month__nav-separator {
@@ -1045,14 +1050,28 @@ h3 {
 
 .agenda-day--selected {
     background: #f4f8ff;
-    outline: 1px solid rgba(49, 88, 215, 0.38);
-    outline-offset: -1px;
+    outline: 2px solid rgba(49, 88, 215, 0.38);
+    outline-offset: -2px;
 }
 
 .agenda-day__top {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
+}
+
+.agenda-day__link {
+    display: grid;
+    align-content: start;
+    gap: 3px;
+    min-height: 100%;
+    color: inherit;
+    text-decoration: none;
+}
+
+.agenda-day__link:focus-visible {
+    outline: 2px solid rgba(49, 88, 215, 0.28);
+    outline-offset: 2px;
 }
 
 .agenda-day__number {

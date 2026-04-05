@@ -1,0 +1,64 @@
+<article class="agenda-month">
+    <div class="agenda-month__header">
+        <h2>{{ visible_month_title }}</h2>
+        <nav class="agenda-month__nav" aria-label="Navegacion visual del mes">
+            <a
+                class="agenda-month__nav-link"
+                href="?{{ previous_month_query }}"
+                hx-get="?{{ previous_month_query }}"
+                hx-target="#agenda-interactive-region"
+                hx-select="#agenda-interactive-region"
+                hx-swap="outerHTML"
+                hx-push-url="true"
+            >
+                Anterior
+            </a>
+            <span class="agenda-month__nav-separator">&middot;</span>
+            <a
+                class="agenda-month__nav-link"
+                href="?{{ next_month_query }}"
+                hx-get="?{{ next_month_query }}"
+                hx-target="#agenda-interactive-region"
+                hx-select="#agenda-interactive-region"
+                hx-swap="outerHTML"
+                hx-push-url="true"
+            >
+                Siguiente
+            </a>
+        </nav>
+    </div>
+
+    <div class="agenda-month__weekdays" aria-hidden="true">
+        {% for weekday in weekday_labels %}
+        <span class="agenda-month__weekday">{{ weekday }}</span>
+        {% endfor %}
+    </div>
+
+    <div class="agenda-month__grid agenda-month__grid--weeks-{{ agenda_weeks|length }}">
+        {% for week in agenda_weeks %}
+            {% for day in week %}
+            <article class="agenda-day{% if day.outside %} agenda-day--outside{% endif %}{% if day.today %} agenda-day--today{% endif %}{% if day.selected %} agenda-day--selected{% endif %}">
+                <a
+                    class="agenda-day__link"
+                    href="?{{ day.querystring }}"
+                    hx-get="?{{ day.querystring }}"
+                    hx-target="#agenda-interactive-region"
+                    hx-select="#agenda-interactive-region"
+                    hx-swap="outerHTML"
+                    hx-push-url="true"
+                    {% if day.selected %}aria-current="date"{% endif %}
+                >
+                    <div class="agenda-day__top">
+                        <span class="agenda-day__number">{{ day.number }}</span>
+                    </div>
+                    <div class="agenda-day__markers">
+                        {% for marker in day.markers %}
+                        <span class="agenda-day__marker{% if marker.kind %} agenda-day__marker--{{ marker.kind }}{% endif %}">{{ marker.label }}</span>
+                        {% endfor %}
+                    </div>
+                </a>
+            </article>
+            {% endfor %}
+        {% endfor %}
+    </div>
+</article>

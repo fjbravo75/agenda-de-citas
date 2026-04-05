@@ -48,3 +48,10 @@
     </div>
 </footer>
 {% endblock %}
+
+{% block extra_js %}
+{% if request.path == '/app/' %}
+<script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js"></script>
+{% endif %}
+{{ block.super }}
+{% endblock %}

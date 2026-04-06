@@ -7,10 +7,9 @@ from django.db.models.functions import TruncDate
 from django.utils import timezone
 from django.views.generic import TemplateView
 
-from .models import Appointment
+from .models import AGENDA_SLOT_TIMES, Appointment, AvailabilityBlock, WeeklyAvailability
 
 
-AGENDA_SLOT_TIMES = ("09:00", "10:00", "11:00", "12:00", "13:00", "16:00", "17:00", "18:00")
 AGENDA_SLOT_VALUES = tuple(time.fromisoformat(value) for value in AGENDA_SLOT_TIMES)
 ACTIVE_CALENDAR_STATUS_KEYS = {Appointment.Status.PENDING, Appointment.Status.CONFIRMED}
 
@@ -76,6 +75,14 @@ def _format_count_label(count, singular, plural):
     return f"{count} {singular if count == 1 else plural}"
 
 
+def _join_summary_parts(parts):
+    if not parts:
+        return "Agenda ligera, sin disponibilidad configurada."
+    if len(parts) == 1:
+        return f"{parts[0]}."
+    return f"{', '.join(parts[:-1])} y {parts[-1]}."
+
+
 def _format_day_title(selected_day):
     return f"{WEEKDAY_NAMES[selected_day.weekday()]} {selected_day.day} de {MONTH_NAMES[selected_day.month]}"
 
@@ -122,52 +129,84 @@ def _appointments_for_day(target_day):
     )
 
 
-def _build_timeline_slots(appointments):
+def _available_slots_for_day(target_day):
+    return set(
+        WeeklyAvailability.objects.filter(weekday=target_day.weekday()).values_list("slot_time", flat=True)
+    )
+
+
+def _blocked_slots_for_day(target_day):
+    return {
+        block.slot_time: block.label or "Bloqueo puntual"
+        for block in AvailabilityBlock.objects.filter(day=target_day).order_by("slot_time", "id")
+    }
+
+
+def _build_timeline_slots(target_day, appointments):
     slots = _empty_timeline_slots()
     slot_map = {slot["time"]: slot for slot in slots}
+    available_slots = _available_slots_for_day(target_day)
+    blocked_slots = _blocked_slots_for_day(target_day)
+
     for appointment in appointments:
         slot_map[_slot_label_for_datetime(appointment.start_at)]["entries"].append(
             _build_entry_from_appointment(appointment)
         )
+
+    for slot in slots:
+        if slot["entries"]:
+            slot["available_label"] = ""
+            slot["unavailable_label"] = ""
+            continue
+
+        if slot["time"] in blocked_slots:
+            slot["blocked_label"] = blocked_slots[slot["time"]]
+            slot["available_label"] = ""
+            slot["unavailable_label"] = ""
+            continue
+
+        if slot["time"] in available_slots:
+            slot["available_label"] = "Disponible"
+            slot["unavailable_label"] = ""
+            continue
+
+        slot["available_label"] = ""
+        slot["unavailable_label"] = "Fuera de disponibilidad"
+
     return slots
 
 
 def _build_day_summary(timeline_slots):
-    active_entries = sum(
-        1
-        for slot in timeline_slots
-        for entry in slot["entries"]
-        if entry["status_key"] in ACTIVE_CALENDAR_STATUS_KEYS
-    )
-    cancelled_entries = sum(
-        1
-        for slot in timeline_slots
-        for entry in slot["entries"]
-        if entry["status_key"] == Appointment.Status.CANCELLED
-    )
-    occupied_slots = sum(1 for slot in timeline_slots if slot["entries"])
+    slots_with_appointments = sum(1 for slot in timeline_slots if slot["entries"])
+    blocked_slots = sum(1 for slot in timeline_slots if not slot["entries"] and slot["blocked_label"])
+    available_slots = sum(1 for slot in timeline_slots if slot.get("available_label"))
+    unavailable_slots = sum(1 for slot in timeline_slots if slot.get("unavailable_label"))
 
-    if not active_entries and not cancelled_entries:
-        return "Agenda ligera, sin citas previstas."
-
-    if not active_entries:
-        return (
-            f"{_format_count_label(cancelled_entries, 'cancelada visible', 'canceladas visibles')} "
-            f"en {_format_count_label(occupied_slots, 'tramo', 'tramos')}."
+    summary_parts = []
+    if slots_with_appointments:
+        summary_parts.append(
+            _format_count_label(slots_with_appointments, "tramo con cita", "tramos con cita")
         )
-
-    summary = (
-        f"{_format_count_label(active_entries, 'activa', 'activas')} "
-        f"en {_format_count_label(occupied_slots, 'tramo', 'tramos')}"
-    )
-    if cancelled_entries:
-        summary += f", {_format_count_label(cancelled_entries, 'cancelada visible', 'canceladas visibles')}"
-    return f"{summary}."
+    if blocked_slots:
+        summary_parts.append(_format_count_label(blocked_slots, "bloqueo", "bloqueos"))
+    if available_slots:
+        summary_parts.append(
+            _format_count_label(available_slots, "tramo disponible", "tramos disponibles")
+        )
+    if unavailable_slots:
+        summary_parts.append(
+            _format_count_label(
+                unavailable_slots,
+                "tramo fuera de disponibilidad",
+                "tramos fuera de disponibilidad",
+            )
+        )
+    return _join_summary_parts(summary_parts)
 
 
 def _build_day_panel(selected_day):
     appointments = _appointments_for_day(selected_day)
-    timeline_slots = _build_timeline_slots(appointments)
+    timeline_slots = _build_timeline_slots(selected_day, appointments)
     return {
         "selected_day_title": _format_day_title(selected_day),
         "selected_day_summary": _build_day_summary(timeline_slots),
@@ -225,7 +264,7 @@ def _month_summary(visible_year, visible_month):
     next_year, next_month = _adjacent_month(visible_year, visible_month, 1)
     month_end = date(next_year, next_month, 1)
 
-    summary_rows = (
+    appointment_rows = (
         Appointment.objects.filter(
             start_at__gte=_aware_day_start(month_start),
             start_at__lt=_aware_day_start(month_end),
@@ -239,13 +278,30 @@ def _month_summary(visible_year, visible_month):
         .order_by("local_day")
     )
 
-    return {
+    block_rows = (
+        AvailabilityBlock.objects.filter(day__gte=month_start, day__lt=month_end)
+        .values("day")
+        .annotate(block_count=Count("id"))
+        .order_by("day")
+    )
+
+    summary = {
         row["local_day"]: {
             "active_count": row["active_count"],
             "confirmed_count": row["confirmed_count"],
+            "block_count": 0,
         }
-        for row in summary_rows
+        for row in appointment_rows
     }
+
+    for row in block_rows:
+        day_summary = summary.setdefault(
+            row["day"],
+            {"active_count": 0, "confirmed_count": 0, "block_count": 0},
+        )
+        day_summary["block_count"] = row["block_count"]
+
+    return summary
 
 
 def _build_markers_for_day(target_day, visible_month_date, month_summary):
@@ -255,6 +311,7 @@ def _build_markers_for_day(target_day, visible_month_date, month_summary):
     day_summary = month_summary.get(target_day, {})
     active_entries = day_summary.get("active_count", 0)
     confirmed_entries = day_summary.get("confirmed_count", 0)
+    blocked_slots = day_summary.get("block_count", 0)
 
     markers = []
     if active_entries:
@@ -264,7 +321,14 @@ def _build_markers_for_day(target_day, visible_month_date, month_summary):
                 "kind": "busy",
             }
         )
-    if confirmed_entries:
+    if blocked_slots:
+        markers.append(
+            {
+                "label": _format_count_label(blocked_slots, "bloqueo", "bloqueos"),
+                "kind": "blocked",
+            }
+        )
+    elif confirmed_entries:
         markers.append(
             {
                 "label": _format_count_label(confirmed_entries, "confirmada", "confirmadas"),

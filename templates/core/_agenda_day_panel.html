@@ -24,8 +24,10 @@
                 </div>
                 {% elif slot.blocked_label %}
                 <span class="agenda-slot__state agenda-slot__state--blocked">{{ slot.blocked_label }}</span>
+                {% elif slot.available_label %}
+                <span class="agenda-slot__state agenda-slot__state--available">{{ slot.available_label }}</span>
                 {% else %}
-                <span class="agenda-slot__state agenda-slot__state--empty" aria-hidden="true"></span>
+                <span class="agenda-slot__state agenda-slot__state--unavailable">{{ slot.unavailable_label }}</span>
                 {% endif %}
             </div>
         </article>

@@ -1266,6 +1266,21 @@ h3 {
     color: var(--color-warning);
 }
 
+.agenda-slot__state--available {
+    font-size: 9px;
+    font-weight: 400;
+    line-height: 1.1;
+    color: var(--color-text-muted);
+}
+
+.agenda-slot__state--unavailable {
+    font-size: 9px;
+    font-weight: 400;
+    line-height: 1.1;
+    color: var(--color-text-soft);
+    opacity: 0.82;
+}
+
 .app-agenda-screen .footer-row {
     padding: 14px 0;
 }

@@ -4,7 +4,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Appointment, Client, Service
+from .models import Appointment, AvailabilityBlock, Client, Service, WeeklyAvailability
 
 
 class AppEntryPointViewTests(TestCase):
@@ -28,6 +28,13 @@ class AppEntryPointViewTests(TestCase):
             status=status,
         )
 
+    def _create_weekly_availability(self, target_day, slot_times):
+        for slot_time in slot_times:
+            WeeklyAvailability.objects.create(weekday=target_day.weekday(), slot_time=slot_time)
+
+    def _create_block(self, target_day, slot_time, label="Bloqueo puntual"):
+        return AvailabilityBlock.objects.create(day=target_day, slot_time=slot_time, label=label)
+
     def _day_context(self, response, target_day):
         for week in response.context["agenda_weeks"]:
             for week_day in week:
@@ -35,8 +42,16 @@ class AppEntryPointViewTests(TestCase):
                     return week_day
         self.fail(f"Day {target_day.isoformat()} not found in agenda_weeks context.")
 
-    def test_agenda_metrics_and_panel_use_database_appointments(self):
+    def _slot_context(self, response, slot_time):
+        for slot in response.context["agenda_timeline_slots"]:
+            if slot["time"] == slot_time:
+                return slot
+        self.fail(f"Slot {slot_time} not found in agenda_timeline_slots.")
+
+    def test_agenda_metrics_and_daily_states_use_real_data(self):
         today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00", "12:00", "16:00", "17:00"))
+        self._create_block(today, "16:00", label="Bloqueo interno")
         self._create_appointment(
             self.primary_client,
             self.review_service,
@@ -50,6 +65,13 @@ class AppEntryPointViewTests(TestCase):
             today,
             time(10, 30),
             Appointment.Status.PENDING,
+        )
+        self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(12, 0),
+            Appointment.Status.CONFIRMED,
         )
         self._create_appointment(
             self.tertiary_client,
@@ -67,17 +89,21 @@ class AppEntryPointViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Claudia Real")
         self.assertContains(response, "10:30")
-        self.assertContains(response, "Cancelada")
+        self.assertContains(response, "Bloqueo interno")
+        self.assertContains(response, "Disponible")
+        self.assertContains(response, "Fuera de disponibilidad")
 
         metrics = {metric["label"]: metric["value"] for metric in response.context["agenda_metrics"]}
-        self.assertEqual(metrics["Citas activas"], "02")
-        self.assertEqual(metrics["Tramos con citas"], "03")
-        self.assertEqual(metrics["Confirmadas"], "01")
+        self.assertEqual(metrics["Citas activas"], "03")
+        self.assertEqual(metrics["Tramos con citas"], "04")
+        self.assertEqual(metrics["Confirmadas"], "02")
         self.assertEqual(metrics["Canceladas"], "01")
 
-    def test_month_markers_count_only_pending_and_confirmed(self):
+    def test_month_markers_keep_active_count_and_add_block_signal(self):
         today = timezone.localdate()
         selected_day = today + timedelta(days=1)
+        self._create_weekly_availability(selected_day, ("09:00", "10:00", "11:00"))
+        self._create_block(selected_day, "11:00")
         self._create_appointment(
             self.primary_client,
             self.review_service,
@@ -108,12 +134,14 @@ class AppEntryPointViewTests(TestCase):
         day_context = self._day_context(response, selected_day)
         self.assertEqual(
             [marker["label"] for marker in day_context["markers"]],
-            ["2 citas", "1 confirmada"],
+            ["2 citas", "1 bloqueo"],
         )
 
-    def test_selected_day_panel_changes_with_querystring_and_keeps_cancelled_visible(self):
+    def test_daily_panel_priority_is_appointment_then_block_then_available_then_unavailable(self):
         today = timezone.localdate()
-        selected_day = today + timedelta(days=2)
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00"))
+        self._create_block(today, "09:00")
+        self._create_block(today, "10:00")
         self._create_appointment(
             self.primary_client,
             self.review_service,
@@ -121,25 +149,19 @@ class AppEntryPointViewTests(TestCase):
             time(9, 0),
             Appointment.Status.CONFIRMED,
         )
-        self._create_appointment(
-            self.secondary_client,
-            self.control_service,
-            selected_day,
-            time(12, 30),
-            Appointment.Status.CANCELLED,
-        )
 
         response = self.client.get(
             reverse("core:app_entrypoint"),
-            {"year": selected_day.year, "month": selected_day.month, "day": selected_day.day},
+            {"year": today.year, "month": today.month, "day": today.day},
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Mario Real")
-        self.assertContains(response, "12:30")
-        self.assertNotContains(response, "Claudia Real")
-        self.assertContains(response, "cancelada visible")
+        slot_09 = self._slot_context(response, "09:00")
+        slot_10 = self._slot_context(response, "10:00")
+        slot_11 = self._slot_context(response, "11:00")
+        slot_12 = self._slot_context(response, "12:00")
 
-        metrics = {metric["label"]: metric["value"] for metric in response.context["agenda_metrics"]}
-        self.assertEqual(metrics["Citas activas"], "01")
-        self.assertEqual(metrics["Canceladas"], "00")
+        self.assertEqual(len(slot_09["entries"]), 1)
+        self.assertEqual(slot_09["blocked_label"], "")
+        self.assertEqual(slot_10["blocked_label"], "Bloqueo puntual")
+        self.assertEqual(slot_11["available_label"], "Disponible")
+        self.assertEqual(slot_12["unavailable_label"], "Fuera de disponibilidad")

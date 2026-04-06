@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from core.models import Appointment, Client, Service
+from core.models import Appointment, AvailabilityBlock, Client, Service, Weekday, WeeklyAvailability
 
 
 class Command(BaseCommand):
@@ -27,6 +27,8 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             if reset:
+                AvailabilityBlock.objects.all().delete()
+                WeeklyAvailability.objects.all().delete()
                 Appointment.objects.all().delete()
                 Service.objects.all().delete()
                 Client.objects.all().delete()
@@ -34,16 +36,29 @@ class Command(BaseCommand):
             dataset = self._build_dataset()
             clients = self._create_clients(dataset["clients"])
             services = self._create_services(dataset["services"])
+            availability_count = self._create_weekly_availability(dataset["weekly_availability"])
+            block_count = self._create_availability_blocks(dataset["availability_blocks"])
             created_appointments = self._create_appointments(dataset["appointments"], clients, services)
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Agenda demo loaded: {len(clients)} clients, {len(services)} services, {created_appointments} appointments."
+                "Agenda demo loaded: "
+                f"{len(clients)} clients, "
+                f"{len(services)} services, "
+                f"{availability_count} availability slots, "
+                f"{block_count} blocks, "
+                f"{created_appointments} appointments."
             )
         )
 
     def _has_existing_data(self):
-        return Client.objects.exists() or Service.objects.exists() or Appointment.objects.exists()
+        return (
+            Client.objects.exists()
+            or Service.objects.exists()
+            or Appointment.objects.exists()
+            or WeeklyAvailability.objects.exists()
+            or AvailabilityBlock.objects.exists()
+        )
 
     def _build_dataset(self):
         today = timezone.localdate()
@@ -71,6 +86,16 @@ class Command(BaseCommand):
                 {"name": "Seguimiento", "duration_minutes": 30, "color": "#A06A11"},
                 {"name": "Evaluacion", "duration_minutes": 60, "color": "#AE4C42"},
                 {"name": "Control", "duration_minutes": 30, "color": "#6D7A8C"},
+            ],
+            "weekly_availability": [
+                {"weekday": weekday, "slot_time": slot_time}
+                for weekday in Weekday.values
+                for slot_time in ("09:00", "10:00", "11:00", "12:00", "16:00", "17:00", "18:00")
+            ],
+            "availability_blocks": [
+                {"day": demo_days["today"], "slot_time": "16:00", "label": "Bloqueo interno"},
+                {"day": demo_days["next_day"], "slot_time": "11:00", "label": "Bloqueo puntual"},
+                {"day": demo_days["one_week"], "slot_time": "09:00", "label": "Bloqueo puntual"},
             ],
             "appointments": [
                 {
@@ -153,6 +178,20 @@ class Command(BaseCommand):
             service = Service.objects.create(**definition)
             services[service.name] = service
         return services
+
+    def _create_weekly_availability(self, availability_definitions):
+        created = 0
+        for definition in availability_definitions:
+            WeeklyAvailability.objects.create(**definition)
+            created += 1
+        return created
+
+    def _create_availability_blocks(self, block_definitions):
+        created = 0
+        for definition in block_definitions:
+            AvailabilityBlock.objects.create(**definition)
+            created += 1
+        return created
 
     def _create_appointments(self, appointment_definitions, clients, services):
         current_tz = timezone.get_current_timezone()

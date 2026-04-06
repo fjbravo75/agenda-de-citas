@@ -1,14 +1,18 @@
 from calendar import Calendar, monthrange
-from copy import deepcopy
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from urllib.parse import urlencode
 
+from django.db.models import Count, Q
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 from django.views.generic import TemplateView
 
+from .models import Appointment
+
 
 AGENDA_SLOT_TIMES = ("09:00", "10:00", "11:00", "12:00", "13:00", "16:00", "17:00", "18:00")
-ACTIVE_CALENDAR_STATUS_KEYS = {"pending", "confirmed"}
+AGENDA_SLOT_VALUES = tuple(time.fromisoformat(value) for value in AGENDA_SLOT_TIMES)
+ACTIVE_CALENDAR_STATUS_KEYS = {Appointment.Status.PENDING, Appointment.Status.CONFIRMED}
 
 WEEKDAY_SHORT_LABELS = ("Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom")
 WEEKDAY_NAMES = ("Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo")
@@ -27,320 +31,22 @@ MONTH_NAMES = {
     12: "diciembre",
 }
 
-AGENDA_ENTRY_SEEDS = [
-    {"name": "Marta Leon", "service": "Fisio inicial", "status": "Confirmada", "status_key": "confirmed"},
-    {"name": "Carlos Ruiz", "service": "Revision", "status": "Confirmada", "status_key": "confirmed"},
-    {"name": "Ana Perez", "service": "Seguimiento", "status": "Pendiente", "status_key": "pending"},
-    {"name": "Lucia Gomez", "service": "Evaluacion", "status": "Confirmada", "status_key": "confirmed"},
-    {"name": "Sofia Marquez", "service": "Control", "status": "Pendiente", "status_key": "pending"},
-    {"name": "Raul Soto", "service": "Primera", "status": "Cancelada", "status_key": "cancelled"},
-    {"name": "Nora Vidal", "service": "Llamada", "status": "Cancelada", "status_key": "cancelled"},
-    {"name": "Laura Vega", "service": "Revision", "status": "Pendiente", "status_key": "pending"},
-]
-
-EXPLICIT_DAY_DETAILS = {
-    date(2026, 4, 7): {
-        "summary": "3 tramos ocupados, 4 limpios y 1 hueco libre largo.",
-        "slots": [
-            {
-                "time": "09:00",
-                "entries": [
-                    {"name": "Paula Martin", "service": "Revision", "status": "Confirmada", "status_key": "confirmed"}
-                ],
-                "blocked_label": "",
-            },
-            {
-                "time": "10:00",
-                "entries": [
-                    {"name": "Diego Lara", "service": "Control", "status": "Pendiente", "status_key": "pending"}
-                ],
-                "blocked_label": "",
-            },
-            {"time": "11:00", "entries": [], "blocked_label": ""},
-            {
-                "time": "12:00",
-                "entries": [
-                    {"name": "Marta Leon", "service": "Seguimiento", "status": "Confirmada", "status_key": "confirmed"}
-                ],
-                "blocked_label": "",
-            },
-            {"time": "13:00", "entries": [], "blocked_label": ""},
-            {"time": "16:00", "entries": [], "blocked_label": ""},
-            {
-                "time": "17:00",
-                "entries": [
-                    {"name": "Lucia Gomez", "service": "Evaluacion", "status": "Confirmada", "status_key": "confirmed"}
-                ],
-                "blocked_label": "",
-            },
-            {"time": "18:00", "entries": [], "blocked_label": ""},
-        ],
-    },
-    date(2026, 4, 8): {
-        "summary": "4 tramos ocupados, 3 limpios y 1 bloqueo parcial.",
-        "slots": [
-            {
-                "time": "09:00",
-                "entries": [
-                    {"name": "Marta Leon", "service": "Fisio inicial", "status": "Confirmada", "status_key": "confirmed"}
-                ],
-                "blocked_label": "",
-            },
-            {
-                "time": "10:00",
-                "entries": [
-                    {"name": "Carlos Ruiz", "service": "Revision", "status": "Confirmada", "status_key": "confirmed"},
-                    {"name": "Sofia Marquez", "service": "Control", "status": "Pendiente", "status_key": "pending"},
-                ],
-                "blocked_label": "",
-            },
-            {"time": "11:00", "entries": [], "blocked_label": ""},
-            {
-                "time": "12:00",
-                "entries": [
-                    {"name": "Ana Perez", "service": "Seguimiento", "status": "Pendiente", "status_key": "pending"},
-                    {"name": "Raul Soto", "service": "Primera", "status": "Cancelada", "status_key": "cancelled"},
-                    {"name": "Nora Vidal", "service": "Llamada", "status": "Cancelada", "status_key": "cancelled"},
-                ],
-                "blocked_label": "",
-            },
-            {"time": "13:00", "entries": [], "blocked_label": "Bloqueo parcial"},
-            {"time": "16:00", "entries": [], "blocked_label": ""},
-            {
-                "time": "17:00",
-                "entries": [
-                    {"name": "Lucia Gomez", "service": "Evaluacion", "status": "Confirmada", "status_key": "confirmed"}
-                ],
-                "blocked_label": "",
-            },
-            {"time": "18:00", "entries": [], "blocked_label": ""},
-        ],
-    },
-    date(2026, 4, 10): {
-        "summary": "2 tramos ocupados y resto limpio, sin bloqueos.",
-        "slots": [
-            {
-                "time": "09:00",
-                "entries": [
-                    {"name": "Alberto Cano", "service": "Primera", "status": "Confirmada", "status_key": "confirmed"}
-                ],
-                "blocked_label": "",
-            },
-            {"time": "10:00", "entries": [], "blocked_label": ""},
-            {"time": "11:00", "entries": [], "blocked_label": ""},
-            {
-                "time": "12:00",
-                "entries": [
-                    {"name": "Laura Vega", "service": "Revision", "status": "Pendiente", "status_key": "pending"}
-                ],
-                "blocked_label": "",
-            },
-            {"time": "13:00", "entries": [], "blocked_label": ""},
-            {"time": "16:00", "entries": [], "blocked_label": ""},
-            {"time": "17:00", "entries": [], "blocked_label": ""},
-            {"time": "18:00", "entries": [], "blocked_label": ""},
-        ],
-    },
-    date(2026, 4, 15): {
-        "summary": "1 bloqueo parcial y resto de la agenda limpia.",
-        "slots": [
-            {"time": "09:00", "entries": [], "blocked_label": ""},
-            {"time": "10:00", "entries": [], "blocked_label": ""},
-            {"time": "11:00", "entries": [], "blocked_label": ""},
-            {"time": "12:00", "entries": [], "blocked_label": ""},
-            {"time": "13:00", "entries": [], "blocked_label": "Bloqueo parcial"},
-            {"time": "16:00", "entries": [], "blocked_label": ""},
-            {"time": "17:00", "entries": [], "blocked_label": ""},
-            {"time": "18:00", "entries": [], "blocked_label": ""},
-        ],
-    },
-}
-
 
 def _real_today():
     return timezone.localdate()
 
 
-def _copy_slots(slots):
-    copied_slots = deepcopy(slots)
-    for slot in copied_slots:
-        slot["entries"] = [_normalize_entry(entry) for entry in slot.get("entries", ())]
-    return copied_slots
+def _current_timezone():
+    return timezone.get_current_timezone()
 
 
-def _normalize_entry(entry):
-    normalized_entry = entry.copy()
-    status_key = normalized_entry.get("status_key")
-    if status_key == "completed":
-        normalized_entry["status_key"] = "confirmed"
-        normalized_entry["status"] = "Confirmada"
-    elif status_key in {"missed", "no_show"}:
-        normalized_entry["status_key"] = "cancelled"
-        normalized_entry["status"] = "Cancelada"
-    return normalized_entry
+def _aware_day_start(target_day):
+    return timezone.make_aware(datetime.combine(target_day, time.min), _current_timezone())
 
 
-def _format_day_title(selected_day):
-    return f"{WEEKDAY_NAMES[selected_day.weekday()]} {selected_day.day} de {MONTH_NAMES[selected_day.month]}"
-
-
-def _format_month_title(year, month):
-    return f"{MONTH_NAMES[month].capitalize()} {year}"
-
-
-def _format_today_context_label(target_day):
-    return f"Hoy · {target_day.day} {MONTH_NAMES[target_day.month]} {target_day.year}"
-
-
-def _day_signature(target_day):
-    seed = target_day.toordinal()
-    if target_day.weekday() >= 5:
-        busy_count = 0 if target_day.day % 2 else 1
-    else:
-        busy_count = (seed % 4) + 1
-        if target_day.day % 7 == 0:
-            busy_count = min(busy_count + 1, 5)
-    has_blocked = target_day.weekday() < 5 and ((target_day.day + target_day.month) % 6 == 0)
-    confirmed_count = max(1, busy_count - 1) if busy_count >= 3 and target_day.day % 2 == 0 else 0
-    return {"busy_count": busy_count, "has_blocked": has_blocked, "confirmed_count": confirmed_count}
-
-
-def _build_markers_for_day(target_day, visible_month):
-    if target_day.month != visible_month.month or target_day.year != visible_month.year:
-        return []
-
-    day_base = _build_day_base(target_day)
-    return _build_markers_from_slots(day_base["slots"])
-
-
-def _build_markers_from_slots(timeline_slots):
-    active_entries = sum(
-        1
-        for slot in timeline_slots
-        for entry in slot.get("entries", ())
-        if entry.get("status_key") in ACTIVE_CALENDAR_STATUS_KEYS
-    )
-    confirmed_entries = sum(
-        1
-        for slot in timeline_slots
-        for entry in slot.get("entries", ())
-        if entry.get("status_key") == "confirmed"
-    )
-    has_blocked = any(slot.get("blocked_label") for slot in timeline_slots)
-
-    markers = []
-    if active_entries:
-        label = "1 cita" if active_entries == 1 else f"{active_entries} citas"
-        markers.append({"label": label, "kind": "busy"})
-    if confirmed_entries:
-        markers.append({"label": f"{confirmed_entries} confirmadas", "kind": "neutral"})
-    elif has_blocked:
-        markers.append({"label": "bloqueo parcial", "kind": "blocked"})
-    return markers[:2]
-
-
-def _entry_distribution(busy_count):
-    distribution_map = {
-        0: [],
-        1: [1],
-        2: [1, 1],
-        3: [1, 1, 1],
-        4: [1, 2, 1],
-        5: [1, 2, 2],
-    }
-    return distribution_map.get(min(busy_count, 5), [1, 2, 2])
-
-
-def _entry_for_position(target_day, offset):
-    seed = AGENDA_ENTRY_SEEDS[(target_day.day + target_day.month + offset) % len(AGENDA_ENTRY_SEEDS)]
-    return _normalize_entry(seed)
-
-
-def _build_dynamic_slots(target_day, busy_count, has_blocked):
-    slots = [{"time": time, "entries": [], "blocked_label": ""} for time in AGENDA_SLOT_TIMES]
-    slot_map = {slot["time"]: slot for slot in slots}
-    occupied_times = ("09:00", "10:00", "12:00")
-    entry_offset = 0
-
-    for index, count in enumerate(_entry_distribution(busy_count)):
-        time = occupied_times[index]
-        slot_map[time]["entries"] = [_entry_for_position(target_day, entry_offset + position) for position in range(count)]
-        entry_offset += count
-
-    if has_blocked:
-        slot_map["13:00"]["blocked_label"] = "Bloqueo parcial"
-
-    return slots
-
-
-def _build_dynamic_summary(busy_count, has_blocked):
-    occupied_slot_count = len(_entry_distribution(busy_count))
-    if occupied_slot_count and has_blocked:
-        return f"{occupied_slot_count} tramos ocupados, {8 - occupied_slot_count - 1} limpios y 1 bloqueo parcial."
-    if occupied_slot_count:
-        return f"{occupied_slot_count} tramos ocupados y resto limpio."
-    if has_blocked:
-        return "1 bloqueo parcial y resto limpio."
-    return "Agenda ligera, sin citas previstas ni bloqueos."
-
-
-def _build_day_base(selected_day):
-    explicit_detail = EXPLICIT_DAY_DETAILS.get(selected_day)
-    if explicit_detail:
-        return {
-            "summary": explicit_detail["summary"],
-            "slots": _copy_slots(explicit_detail["slots"]),
-        }
-
-    signature = _day_signature(selected_day)
-    return {
-        "summary": _build_dynamic_summary(signature["busy_count"], signature["has_blocked"]),
-        "slots": _build_dynamic_slots(selected_day, signature["busy_count"], signature["has_blocked"]),
-    }
-
-
-def _build_day_panel(selected_day):
-    day_base = _build_day_base(selected_day)
-    return {
-        "selected_day_title": _format_day_title(selected_day),
-        "selected_day_summary": day_base["summary"],
-        "agenda_timeline_slots": day_base["slots"],
-    }
-
-
-def _build_agenda_metrics(timeline_slots):
-    total_entries = sum(len(slot.get("entries", ())) for slot in timeline_slots)
-    free_slots = sum(1 for slot in timeline_slots if not slot.get("entries") and not slot.get("blocked_label"))
-    confirmed_entries = sum(
-        1
-        for slot in timeline_slots
-        for entry in slot.get("entries", ())
-        if entry.get("status_key") == "confirmed"
-    )
-    blocked_slots = sum(1 for slot in timeline_slots if slot.get("blocked_label"))
-
-    return [
-        {
-            "label": "Citas de hoy",
-            "value": f"{total_entries:02d}",
-            "meta": "entradas previstas en la agenda",
-        },
-        {
-            "label": "Huecos libres",
-            "value": f"{free_slots:02d}",
-            "meta": "tramos sin cita ni bloqueo",
-        },
-        {
-            "label": "Confirmadas",
-            "value": f"{confirmed_entries:02d}",
-            "meta": "citas con estado confirmado",
-        },
-        {
-            "label": "Bloqueos de hoy",
-            "value": f"{blocked_slots:02d}",
-            "meta": "tramos bloqueados en la jornada",
-        },
-    ]
+def _day_bounds(target_day):
+    start_at = _aware_day_start(target_day)
+    return start_at, start_at + timedelta(days=1)
 
 
 def _query_string(year, month, day):
@@ -366,7 +72,209 @@ def _navigation_query(year, month, selected_day_number, delta):
     return _query_string(target_year, target_month, target_day)
 
 
-def _build_agenda_weeks(visible_year, visible_month, selected_day, real_today):
+def _format_count_label(count, singular, plural):
+    return f"{count} {singular if count == 1 else plural}"
+
+
+def _format_day_title(selected_day):
+    return f"{WEEKDAY_NAMES[selected_day.weekday()]} {selected_day.day} de {MONTH_NAMES[selected_day.month]}"
+
+
+def _format_month_title(year, month):
+    return f"{MONTH_NAMES[month].capitalize()} {year}"
+
+
+def _format_today_context_label(target_day):
+    return f"Hoy · {target_day.day} {MONTH_NAMES[target_day.month]} {target_day.year}"
+
+
+def _empty_timeline_slots():
+    return [{"time": slot_time, "entries": [], "blocked_label": ""} for slot_time in AGENDA_SLOT_TIMES]
+
+
+def _slot_label_for_datetime(target_datetime):
+    local_time = timezone.localtime(target_datetime).time().replace(second=0, microsecond=0)
+    selected_slot = AGENDA_SLOT_TIMES[0]
+    for index, slot_time in enumerate(AGENDA_SLOT_VALUES):
+        if local_time < slot_time:
+            return AGENDA_SLOT_TIMES[index - 1] if index > 0 else selected_slot
+        selected_slot = AGENDA_SLOT_TIMES[index]
+    return selected_slot
+
+
+def _build_entry_from_appointment(appointment):
+    local_start = timezone.localtime(appointment.start_at)
+    return {
+        "name": appointment.client.name,
+        "service": appointment.service.name,
+        "service_label": f"{local_start:%H:%M} · {appointment.service.name}",
+        "status": appointment.get_status_display(),
+        "status_key": appointment.status,
+    }
+
+
+def _appointments_for_day(target_day):
+    start_at, end_at = _day_bounds(target_day)
+    return list(
+        Appointment.objects.select_related("client", "service")
+        .filter(start_at__gte=start_at, start_at__lt=end_at)
+        .order_by("start_at", "id")
+    )
+
+
+def _build_timeline_slots(appointments):
+    slots = _empty_timeline_slots()
+    slot_map = {slot["time"]: slot for slot in slots}
+    for appointment in appointments:
+        slot_map[_slot_label_for_datetime(appointment.start_at)]["entries"].append(
+            _build_entry_from_appointment(appointment)
+        )
+    return slots
+
+
+def _build_day_summary(timeline_slots):
+    active_entries = sum(
+        1
+        for slot in timeline_slots
+        for entry in slot["entries"]
+        if entry["status_key"] in ACTIVE_CALENDAR_STATUS_KEYS
+    )
+    cancelled_entries = sum(
+        1
+        for slot in timeline_slots
+        for entry in slot["entries"]
+        if entry["status_key"] == Appointment.Status.CANCELLED
+    )
+    occupied_slots = sum(1 for slot in timeline_slots if slot["entries"])
+
+    if not active_entries and not cancelled_entries:
+        return "Agenda ligera, sin citas previstas."
+
+    if not active_entries:
+        return (
+            f"{_format_count_label(cancelled_entries, 'cancelada visible', 'canceladas visibles')} "
+            f"en {_format_count_label(occupied_slots, 'tramo', 'tramos')}."
+        )
+
+    summary = (
+        f"{_format_count_label(active_entries, 'activa', 'activas')} "
+        f"en {_format_count_label(occupied_slots, 'tramo', 'tramos')}"
+    )
+    if cancelled_entries:
+        summary += f", {_format_count_label(cancelled_entries, 'cancelada visible', 'canceladas visibles')}"
+    return f"{summary}."
+
+
+def _build_day_panel(selected_day):
+    appointments = _appointments_for_day(selected_day)
+    timeline_slots = _build_timeline_slots(appointments)
+    return {
+        "selected_day_title": _format_day_title(selected_day),
+        "selected_day_summary": _build_day_summary(timeline_slots),
+        "agenda_timeline_slots": timeline_slots,
+    }
+
+
+def _build_agenda_metrics(timeline_slots):
+    active_entries = sum(
+        1
+        for slot in timeline_slots
+        for entry in slot["entries"]
+        if entry["status_key"] in ACTIVE_CALENDAR_STATUS_KEYS
+    )
+    occupied_slots = sum(1 for slot in timeline_slots if slot["entries"])
+    confirmed_entries = sum(
+        1
+        for slot in timeline_slots
+        for entry in slot["entries"]
+        if entry["status_key"] == Appointment.Status.CONFIRMED
+    )
+    cancelled_entries = sum(
+        1
+        for slot in timeline_slots
+        for entry in slot["entries"]
+        if entry["status_key"] == Appointment.Status.CANCELLED
+    )
+
+    return [
+        {
+            "label": "Citas activas",
+            "value": f"{active_entries:02d}",
+            "meta": "pending + confirmed del dia",
+        },
+        {
+            "label": "Tramos con citas",
+            "value": f"{occupied_slots:02d}",
+            "meta": "bloques visuales con actividad",
+        },
+        {
+            "label": "Confirmadas",
+            "value": f"{confirmed_entries:02d}",
+            "meta": "citas con estado confirmado",
+        },
+        {
+            "label": "Canceladas",
+            "value": f"{cancelled_entries:02d}",
+            "meta": "visibles solo en el panel diario",
+        },
+    ]
+
+
+def _month_summary(visible_year, visible_month):
+    month_start = date(visible_year, visible_month, 1)
+    next_year, next_month = _adjacent_month(visible_year, visible_month, 1)
+    month_end = date(next_year, next_month, 1)
+
+    summary_rows = (
+        Appointment.objects.filter(
+            start_at__gte=_aware_day_start(month_start),
+            start_at__lt=_aware_day_start(month_end),
+        )
+        .annotate(local_day=TruncDate("start_at", tzinfo=_current_timezone()))
+        .values("local_day")
+        .annotate(
+            active_count=Count("id", filter=Q(status__in=ACTIVE_CALENDAR_STATUS_KEYS)),
+            confirmed_count=Count("id", filter=Q(status=Appointment.Status.CONFIRMED)),
+        )
+        .order_by("local_day")
+    )
+
+    return {
+        row["local_day"]: {
+            "active_count": row["active_count"],
+            "confirmed_count": row["confirmed_count"],
+        }
+        for row in summary_rows
+    }
+
+
+def _build_markers_for_day(target_day, visible_month_date, month_summary):
+    if target_day.month != visible_month_date.month or target_day.year != visible_month_date.year:
+        return []
+
+    day_summary = month_summary.get(target_day, {})
+    active_entries = day_summary.get("active_count", 0)
+    confirmed_entries = day_summary.get("confirmed_count", 0)
+
+    markers = []
+    if active_entries:
+        markers.append(
+            {
+                "label": _format_count_label(active_entries, "cita", "citas"),
+                "kind": "busy",
+            }
+        )
+    if confirmed_entries:
+        markers.append(
+            {
+                "label": _format_count_label(confirmed_entries, "confirmada", "confirmadas"),
+                "kind": "neutral",
+            }
+        )
+    return markers[:2]
+
+
+def _build_agenda_weeks(visible_year, visible_month, selected_day, real_today, month_summary):
     month_calendar = Calendar(firstweekday=0).monthdatescalendar(visible_year, visible_month)
     visible_month_date = date(visible_year, visible_month, 1)
     weeks = []
@@ -378,9 +286,9 @@ def _build_agenda_weeks(visible_year, visible_month, selected_day, real_today):
                 {
                     "number": week_day.day,
                     "outside": is_outside,
-                    "today": (week_day == real_today and not is_outside),
+                    "today": week_day == real_today and not is_outside,
                     "selected": week_day == selected_day,
-                    "markers": _build_markers_for_day(week_day, visible_month_date),
+                    "markers": _build_markers_for_day(week_day, visible_month_date, month_summary),
                     "year": week_day.year,
                     "month": week_day.month,
                     "iso_date": week_day.isoformat(),
@@ -419,12 +327,19 @@ class AppEntryPointView(TemplateView):
         visible_year, visible_month, selected_day, real_today = _resolve_calendar_state(self.request)
         day_panel = _build_day_panel(selected_day)
         today_panel = _build_day_panel(real_today)
+        month_summary = _month_summary(visible_year, visible_month)
         context.update(
             {
                 "agenda_metrics": _build_agenda_metrics(today_panel["agenda_timeline_slots"]),
                 "today_context_label": _format_today_context_label(real_today),
                 "weekday_labels": WEEKDAY_SHORT_LABELS,
-                "agenda_weeks": _build_agenda_weeks(visible_year, visible_month, selected_day, real_today),
+                "agenda_weeks": _build_agenda_weeks(
+                    visible_year,
+                    visible_month,
+                    selected_day,
+                    real_today,
+                    month_summary,
+                ),
                 "visible_month_title": _format_month_title(visible_year, visible_month),
                 "previous_month_query": _navigation_query(visible_year, visible_month, selected_day.day, -1),
                 "next_month_query": _navigation_query(visible_year, visible_month, selected_day.day, 1),

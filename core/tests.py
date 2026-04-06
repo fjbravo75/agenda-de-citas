@@ -35,7 +35,7 @@ class AgendaBaseTestCase(TestCase):
         appointment.save()
         return appointment
 
-    def _create_weekly_availability(self, target_day, slot_times, capacity=2):
+    def _create_weekly_availability(self, target_day, slot_times, capacity=3):
         for slot_time in slot_times:
             WeeklyAvailability.objects.create(
                 weekday=target_day.weekday(),
@@ -154,8 +154,55 @@ class AppointmentSlotValidationTests(AgendaBaseTestCase):
 
         self.assertIn("capacidad maxima", str(raised.exception))
 
+    def test_slot_with_capacity_three_accepts_three_active_appointments_and_rejects_a_fourth(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("11:00",), capacity=3)
+
+        self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        self._create_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(11, 0),
+            Appointment.Status.PENDING,
+        )
+        third = self._build_appointment(
+            self.tertiary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        fourth = self._build_appointment(
+            self.fourth_client,
+            self.control_service,
+            today,
+            time(11, 0),
+            Appointment.Status.PENDING,
+        )
+
+        third.save()
+        self.assertEqual(Appointment.active_slot_appointments_count(today, "11:00"), 3)
+
+        with self.assertRaises(ValidationError) as raised:
+            fourth.save()
+
+        self.assertIn("capacidad maxima", str(raised.exception))
+
 
 class AppointmentFlowViewTests(AgendaBaseTestCase):
+    def _slot_context(self, response, slot_time):
+        for slot in response.context["agenda_timeline_slots"]:
+            if slot["time"] == slot_time:
+                return slot
+        self.fail(f"Slot {slot_time} not found in agenda_timeline_slots.")
+
     def _appointment_form_data(self, **overrides):
         today = timezone.localdate()
         data = {
@@ -261,6 +308,89 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "capacidad maxima")
         self.assertEqual(Appointment.objects.count(), 2)
+
+    def test_create_view_accepts_third_appointment_when_capacity_is_three_and_rejects_fourth(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("11:00",), capacity=3)
+        self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        self._create_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(11, 0),
+            Appointment.Status.PENDING,
+        )
+
+        third_response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(client=self.tertiary_client.pk),
+        )
+
+        self.assertEqual(third_response.status_code, 302)
+        self.assertEqual(Appointment.active_slot_appointments_count(today, "11:00"), 3)
+
+        fourth_response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(client=self.fourth_client.pk),
+        )
+
+        self.assertEqual(fourth_response.status_code, 200)
+        self.assertContains(fourth_response, "capacidad maxima")
+        self.assertEqual(Appointment.active_slot_appointments_count(today, "11:00"), 3)
+
+    def test_create_view_uses_same_capacity_rule_and_disables_complete_slot(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=3)
+        self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        self._create_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(11, 0),
+            Appointment.Status.PENDING,
+        )
+
+        almost_full_response = self.client.get(
+            reverse("core:appointment_create"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+        slot_11 = self._slot_context(almost_full_response, "11:00")
+        self.assertEqual(slot_11["complete_label"], "")
+        self.assertEqual(slot_11["busy_label"], "2/3 ocupadas")
+        self.assertContains(almost_full_response, "11:00 · 2/3 ocupadas")
+
+        self._create_appointment(
+            self.tertiary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        full_response = self.client.get(
+            reverse("core:appointment_create"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+        slot_11 = self._slot_context(full_response, "11:00")
+
+        self.assertEqual(slot_11["complete_label"], "Completo")
+        self.assertContains(full_response, 'class="appointment-slot-row appointment-slot-row--complete"')
+        self.assertContains(full_response, "11:00 · Completo")
+        self.assertContains(full_response, 'value="11:00" disabled')
+        self.assertContains(full_response, 'class="field__feedback field__feedback--slot"')
+        self.assertContains(full_response, "Solo se pueden elegir tramos con capacidad libre.")
 
     def test_update_view_keeps_validation_and_allows_valid_edit(self):
         today = timezone.localdate()
@@ -420,10 +550,12 @@ class AppEntryPointViewTests(AgendaBaseTestCase):
         self.assertEqual(len(slot_09["entries"]), 3)
         self.assertEqual(slot_09["complete_label"], "Completo")
         self.assertContains(response, 'class="agenda-slot__entry-card"', count=3)
+        self.assertContains(response, 'class="agenda-slot__time-meta agenda-slot__time-meta--complete"')
         self.assertContains(response, reverse("core:appointment_update", args=[first_appointment.pk]))
         self.assertContains(response, reverse("core:appointment_update", args=[second_appointment.pk]))
         self.assertContains(response, reverse("core:appointment_update", args=[third_appointment.pk]))
         self.assertNotContains(response, 'class="agenda-slot__entry-link"')
+        self.assertNotContains(response, 'class="agenda-slot__state agenda-slot__state--complete"')
         self.assertNotIn(">Editar<", response.content.decode())
 
     def test_month_markers_keep_active_count_and_add_block_signal(self):
@@ -491,6 +623,46 @@ class AppEntryPointViewTests(AgendaBaseTestCase):
         self.assertEqual(slot_10["blocked_label"], "Bloqueo puntual")
         self.assertEqual(slot_11["available_label"], "Disponible")
         self.assertEqual(slot_12["unavailable_label"], "Fuera de disponibilidad")
+
+    def test_daily_panel_waits_for_third_active_entry_before_marking_capacity_three_slot_as_complete(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00",), capacity=3)
+        self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        self._create_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(9, 0),
+            Appointment.Status.PENDING,
+        )
+
+        almost_full_response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+        slot_09 = self._slot_context(almost_full_response, "09:00")
+        self.assertEqual(slot_09["complete_label"], "")
+
+        self._create_appointment(
+            self.tertiary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        full_response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+        slot_09 = self._slot_context(full_response, "09:00")
+        self.assertEqual(slot_09["complete_label"], "Completo")
 
     def test_daily_panel_marks_slot_as_complete_when_capacity_is_exhausted(self):
         today = timezone.localdate()

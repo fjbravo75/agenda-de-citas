@@ -88,7 +88,7 @@ class Command(BaseCommand):
                 {"name": "Control", "duration_minutes": 30, "color": "#6D7A8C"},
             ],
             "weekly_availability": [
-                {"weekday": weekday, "slot_time": slot_time, "capacity": 2}
+                {"weekday": weekday, "slot_time": slot_time, "capacity": 3}
                 for weekday in Weekday.values
                 for slot_time in ("09:00", "10:00", "11:00", "12:00", "16:00", "17:00", "18:00")
             ],

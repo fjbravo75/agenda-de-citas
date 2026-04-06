@@ -15,8 +15,8 @@ from .models import (
     AGENDA_SLOT_TIMES,
     Appointment,
     AvailabilityBlock,
-    WeeklyAvailability,
     agenda_assigned_slot_time,
+    agenda_slot_booking_state,
 )
 
 
@@ -145,10 +145,14 @@ def _empty_timeline_slots():
         {
             "time": slot_time,
             "entries": [],
+            "active_entries_count": 0,
+            "capacity": None,
+            "busy_label": "",
             "blocked_label": "",
             "complete_label": "",
             "available_label": "",
             "unavailable_label": "",
+            "can_book": False,
         }
         for slot_time in AGENDA_SLOT_TIMES
     ]
@@ -178,31 +182,18 @@ def _appointments_for_day(target_day):
     )
 
 
-def _available_slots_for_day(target_day):
-    return set(
-        WeeklyAvailability.objects.filter(weekday=target_day.weekday()).values_list("slot_time", flat=True)
-    )
-
-
-def _available_slot_capacities_for_day(target_day):
-    return dict(
-        WeeklyAvailability.objects.filter(weekday=target_day.weekday()).values_list("slot_time", "capacity")
-    )
-
-
-def _blocked_slots_for_day(target_day):
-    return {
-        block.slot_time: block.label or "Bloqueo puntual"
-        for block in AvailabilityBlock.objects.filter(day=target_day).order_by("slot_time", "id")
-    }
+def _format_busy_slot_label(active_count, capacity):
+    if capacity:
+        occupied_label = "ocupada" if active_count == 1 else "ocupadas"
+        return f"{active_count}/{capacity} {occupied_label}"
+    active_label = "cita activa" if active_count == 1 else "citas activas"
+    return f"{active_count} {active_label}"
 
 
 def _build_timeline_slots(target_day, appointments):
     slots = _empty_timeline_slots()
     slot_map = {slot["time"]: slot for slot in slots}
-    available_slot_capacities = _available_slot_capacities_for_day(target_day)
-    available_slots = _available_slots_for_day(target_day)
-    blocked_slots = _blocked_slots_for_day(target_day)
+    slot_state = agenda_slot_booking_state(target_day)
 
     for appointment in appointments:
         slot_map[agenda_assigned_slot_time(appointment.start_at)]["entries"].append(
@@ -210,20 +201,25 @@ def _build_timeline_slots(target_day, appointments):
         )
 
     for slot in slots:
+        state = slot_state[slot["time"]]
+        slot["active_entries_count"] = state["active_count"]
+        slot["capacity"] = state["capacity"]
+        slot["can_book"] = state["can_book"]
+
         if slot["entries"]:
-            active_entries = sum(
-                1 for entry in slot["entries"] if entry["status_key"] in ACTIVE_CALENDAR_STATUS_KEYS
-            )
-            slot_capacity = available_slot_capacities.get(slot["time"])
-            if slot_capacity and active_entries >= slot_capacity and slot["time"] not in blocked_slots:
+            if state["is_complete"]:
                 slot["complete_label"] = "Completo"
+            elif state["active_count"]:
+                slot["busy_label"] = _format_busy_slot_label(state["active_count"], state["capacity"])
+            else:
+                slot["busy_label"] = "Sin ocupacion activa"
             continue
 
-        if slot["time"] in blocked_slots:
-            slot["blocked_label"] = blocked_slots[slot["time"]]
+        if state["blocked_label"]:
+            slot["blocked_label"] = state["blocked_label"]
             continue
 
-        if slot["time"] in available_slots:
+        if state["is_within_availability"]:
             slot["available_label"] = "Disponible"
             continue
 
@@ -554,12 +550,6 @@ class AppointmentCreateView(AppointmentFormViewBase):
             )
         )
         context.update(day_panel)
-        context.update(
-            {
-                "create_screen_context_label": "Nueva cita · contexto de agenda",
-                "slot_selection_message": "Selecciona un tramo disponible para preparar la cita.",
-            }
-        )
         return context
 
 

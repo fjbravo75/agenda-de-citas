@@ -7,7 +7,12 @@
     <div class="agenda-timeline" aria-label="Timeline fija del día seleccionado">
         {% for slot in agenda_timeline_slots %}
         <article class="agenda-slot{% if slot.entries %} agenda-slot--with-entries{% endif %}{% if slot.blocked_label %} agenda-slot--blocked{% endif %}{% if slot.complete_label %} agenda-slot--complete{% endif %}">
-            <div class="agenda-slot__time">{{ slot.time }}</div>
+            <div class="agenda-slot__time-stack">
+                <div class="agenda-slot__time">{{ slot.time }}</div>
+                {% if slot.complete_label %}
+                <span class="agenda-slot__time-meta agenda-slot__time-meta--complete">{{ slot.complete_label }}</span>
+                {% endif %}
+            </div>
             <div class="agenda-slot__content">
                 {% if slot.entries %}
                 <div class="agenda-slot__entries">
@@ -28,9 +33,6 @@
                     </div>
                     {% endfor %}
                 </div>
-                {% if slot.complete_label %}
-                <span class="agenda-slot__state agenda-slot__state--complete">{{ slot.complete_label }}</span>
-                {% endif %}
                 {% elif slot.blocked_label %}
                 <span class="agenda-slot__state agenda-slot__state--blocked">{{ slot.blocked_label }}</span>
                 {% elif slot.available_label %}

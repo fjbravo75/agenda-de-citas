@@ -1260,6 +1260,14 @@ h3 {
     border-top: none;
 }
 
+.appointment-slot-row--inactive {
+    opacity: 0.84;
+}
+
+.appointment-slot-row--complete {
+    opacity: 1;
+}
+
 .appointment-slot-row__time {
     font-size: 11px;
     font-weight: 700;
@@ -1303,13 +1311,24 @@ h3 {
     display: grid;
     flex: 1;
     min-height: 0;
-    grid-template-rows: auto auto minmax(96px, 1fr);
+    grid-template-rows: auto auto auto;
     gap: 10px 12px;
-    align-content: stretch;
+    align-content: start;
 }
 
 .appointment-create-panel .field {
     gap: 5px;
+}
+
+.appointment-create-panel .field--slot,
+.appointment-create-panel .field--status {
+    align-content: start;
+}
+
+.appointment-create-panel .field--status::after {
+    content: "";
+    display: block;
+    min-height: 24px;
 }
 
 .appointment-create-panel .field label {
@@ -1327,16 +1346,17 @@ h3 {
 }
 
 .appointment-create-panel .field--full {
-    align-self: stretch;
+    align-self: start;
     min-height: 0;
 }
 
 .appointment-create-panel .field textarea {
-    height: 100%;
-    min-height: 96px;
-    max-height: none;
+    height: 72px;
+    min-height: 72px;
+    max-height: 72px;
     padding: 7px 9px;
     font-size: 13px;
+    overflow-y: auto;
     resize: none;
 }
 
@@ -1344,6 +1364,23 @@ h3 {
     padding: 8px 10px;
     font-size: 11px;
     line-height: 1.3;
+}
+
+.appointment-create-panel .field__feedback {
+    display: grid;
+    gap: 2px;
+}
+
+.appointment-create-panel .field__feedback--slot {
+    min-height: 24px;
+    align-content: start;
+}
+
+.appointment-create-panel__slot-help {
+    margin: 0;
+    font-size: 10px;
+    line-height: 1.2;
+    color: var(--color-text-muted);
 }
 
 .appointment-create-panel .error-text {
@@ -1380,11 +1417,28 @@ h3 {
     border-top: 1px solid var(--color-line);
 }
 
+.agenda-slot__time-stack {
+    display: grid;
+    align-content: start;
+    gap: 3px;
+    min-width: 0;
+}
+
 .agenda-slot__time {
     font-size: 11px;
     font-weight: 700;
     line-height: 1;
     color: var(--color-text);
+}
+
+.agenda-slot__time-meta {
+    font-size: 9px;
+    line-height: 1.1;
+}
+
+.agenda-slot__time-meta--complete {
+    color: var(--color-danger);
+    font-weight: 600;
 }
 
 .agenda-slot__content {

@@ -36,16 +36,16 @@
 
                         <div class="appointment-slot-list" aria-label="Reserva visual para tramos del día seleccionado">
                             {% for slot in agenda_timeline_slots %}
-                            <article class="appointment-slot-row">
+                            <article class="appointment-slot-row{% if slot.complete_label %} appointment-slot-row--complete{% elif not slot.can_book %} appointment-slot-row--inactive{% endif %}"{% if not slot.can_book %} aria-disabled="true"{% endif %}>
                                 <div class="appointment-slot-row__time">{{ slot.time }}</div>
                                 <div class="appointment-slot-row__meta">
                                     {% if slot.complete_label %}
                                     <span class="agenda-slot__state agenda-slot__state--complete">{{ slot.complete_label }}</span>
                                     {% elif slot.blocked_label %}
                                     <span class="agenda-slot__state agenda-slot__state--blocked">{{ slot.blocked_label }}</span>
-                                    {% elif slot.entries %}
+                                    {% elif slot.busy_label %}
                                     <span class="appointment-slot-row__state appointment-slot-row__state--busy">
-                                        {{ slot.entries|length }} cita{{ slot.entries|length|pluralize:"s" }} en el tramo
+                                        {{ slot.busy_label }}
                                     </span>
                                     {% elif slot.available_label %}
                                     <span class="agenda-slot__state agenda-slot__state--available">{{ slot.available_label }}</span>
@@ -74,12 +74,20 @@
                                 <div class="form-grid">
                                     {% for field in form %}
                                     {% if field.name != "day" %}
-                                    <div class="field{% if field.name == 'internal_notes' %} field--full{% endif %}">
+                                    <div class="field{% if field.name == 'internal_notes' %} field--full{% endif %}{% if field.name == 'slot_time' %} field--slot{% endif %}{% if field.name == 'status' %} field--status{% endif %}">
                                         {{ field.label_tag }}
                                         {{ field }}
-                                        {% for error in field.errors %}
-                                        <p class="error-text">{{ error }}</p>
-                                        {% endfor %}
+                                        {% if field.name == "slot_time" or field.errors %}
+                                        <div class="field__feedback{% if field.name == 'slot_time' %} field__feedback--slot{% endif %}"{% if field.name == "slot_time" %} aria-live="polite"{% endif %}>
+                                            {% if field.errors %}
+                                            {% for error in field.errors %}
+                                            <p class="error-text">{{ error }}</p>
+                                            {% endfor %}
+                                            {% elif field.name == "slot_time" and field.help_text %}
+                                            <p class="help-text appointment-create-panel__slot-help">{{ field.help_text }}</p>
+                                            {% endif %}
+                                        </div>
+                                        {% endif %}
                                     </div>
                                     {% endif %}
                                     {% endfor %}

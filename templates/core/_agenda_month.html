@@ -4,24 +4,28 @@
         <nav class="agenda-month__nav" aria-label="Navegacion visual del mes">
             <a
                 class="agenda-month__nav-link"
-                href="?{{ previous_month_query }}"
-                hx-get="?{{ previous_month_query }}"
-                hx-target="#agenda-interactive-region"
-                hx-select="#agenda-interactive-region"
+                href="{{ calendar_base_url }}?{{ previous_month_query }}"
+                {% if calendar_hx_enabled %}
+                hx-get="{{ calendar_base_url }}?{{ previous_month_query }}"
+                hx-target="#{{ calendar_hx_target_id }}"
+                hx-select="#{{ calendar_hx_target_id }}"
                 hx-swap="outerHTML"
                 hx-push-url="true"
+                {% endif %}
             >
                 Anterior
             </a>
             <span class="agenda-month__nav-separator">&middot;</span>
             <a
                 class="agenda-month__nav-link"
-                href="?{{ next_month_query }}"
-                hx-get="?{{ next_month_query }}"
-                hx-target="#agenda-interactive-region"
-                hx-select="#agenda-interactive-region"
+                href="{{ calendar_base_url }}?{{ next_month_query }}"
+                {% if calendar_hx_enabled %}
+                hx-get="{{ calendar_base_url }}?{{ next_month_query }}"
+                hx-target="#{{ calendar_hx_target_id }}"
+                hx-select="#{{ calendar_hx_target_id }}"
                 hx-swap="outerHTML"
                 hx-push-url="true"
+                {% endif %}
             >
                 Siguiente
             </a>
@@ -40,12 +44,14 @@
             <article class="agenda-day{% if day.outside %} agenda-day--outside{% endif %}{% if day.today %} agenda-day--today{% endif %}{% if day.selected %} agenda-day--selected{% endif %}">
                 <a
                     class="agenda-day__link"
-                    href="?{{ day.querystring }}"
-                    hx-get="?{{ day.querystring }}"
-                    hx-target="#agenda-interactive-region"
-                    hx-select="#agenda-interactive-region"
+                    href="{{ calendar_base_url }}?{{ day.querystring }}"
+                    {% if calendar_hx_enabled %}
+                    hx-get="{{ calendar_base_url }}?{{ day.querystring }}"
+                    hx-target="#{{ calendar_hx_target_id }}"
+                    hx-select="#{{ calendar_hx_target_id }}"
                     hx-swap="outerHTML"
                     hx-push-url="true"
+                    {% endif %}
                     {% if day.selected %}aria-current="date"{% endif %}
                 >
                     <div class="agenda-day__top">

@@ -1,27 +1,36 @@
 <aside class="agenda-panel">
     <div class="agenda-panel__section">
-        <p class="eyebrow agenda-panel__eyebrow">Dia seleccionado</p>
+        <p class="eyebrow agenda-panel__eyebrow">Día seleccionado</p>
         <h3 class="agenda-panel__date">{{ selected_day_title }}</h3>
-        <p class="text-secondary agenda-panel__summary">{{ selected_day_summary }}</p>
     </div>
 
-    <div class="agenda-timeline" aria-label="Timeline fija del dia seleccionado">
+    <div class="agenda-timeline" aria-label="Timeline fija del día seleccionado">
         {% for slot in agenda_timeline_slots %}
-        <article class="agenda-slot{% if slot.blocked_label %} agenda-slot--blocked{% endif %}">
+        <article class="agenda-slot{% if slot.entries %} agenda-slot--with-entries{% endif %}{% if slot.blocked_label %} agenda-slot--blocked{% endif %}{% if slot.complete_label %} agenda-slot--complete{% endif %}">
             <div class="agenda-slot__time">{{ slot.time }}</div>
             <div class="agenda-slot__content">
                 {% if slot.entries %}
                 <div class="agenda-slot__entries">
                     {% for entry in slot.entries %}
                     <div class="agenda-slot__entry">
-                        <span class="agenda-slot__entry-main">
-                            <span class="agenda-slot__entry-name">{{ entry.name }}</span>
-                            <span class="agenda-slot__entry-service">{{ entry.service_label }}</span>
-                        </span>
-                        <span class="agenda-slot__entry-status agenda-slot__entry-status--{{ entry.status_key }}">{{ entry.status }}</span>
+                        <a
+                            class="agenda-slot__entry-card"
+                            href="{{ entry.edit_url }}"
+                            aria-label="{{ entry.edit_label }}"
+                            title="{{ entry.edit_label }}"
+                        >
+                            <span class="agenda-slot__entry-main">
+                                <span class="agenda-slot__entry-name">{{ entry.name }}</span>
+                                <span class="agenda-slot__entry-service">{{ entry.service_label }}</span>
+                            </span>
+                            <span class="agenda-slot__entry-status agenda-slot__entry-status--{{ entry.status_key }}">{{ entry.status }}</span>
+                        </a>
                     </div>
                     {% endfor %}
                 </div>
+                {% if slot.complete_label %}
+                <span class="agenda-slot__state agenda-slot__state--complete">{{ slot.complete_label }}</span>
+                {% endif %}
                 {% elif slot.blocked_label %}
                 <span class="agenda-slot__state agenda-slot__state--blocked">{{ slot.blocked_label }}</span>
                 {% elif slot.available_label %}

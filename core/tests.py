@@ -1,5 +1,6 @@
 from datetime import datetime, time, timedelta
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -7,20 +8,21 @@ from django.utils import timezone
 from .models import Appointment, AvailabilityBlock, Client, Service, WeeklyAvailability
 
 
-class AppEntryPointViewTests(TestCase):
+class AgendaBaseTestCase(TestCase):
     def setUp(self):
         self.review_service = Service.objects.create(name="Revision", duration_minutes=45, color="#3158D7")
         self.control_service = Service.objects.create(name="Control", duration_minutes=30, color="#2E7A58")
         self.primary_client = Client.objects.create(name="Claudia Real")
         self.secondary_client = Client.objects.create(name="Mario Real")
         self.tertiary_client = Client.objects.create(name="Nora Real")
+        self.fourth_client = Client.objects.create(name="Lia Real")
 
-    def _create_appointment(self, client, service, target_day, start_time, status):
+    def _build_appointment(self, client, service, target_day, start_time, status):
         start_at = timezone.make_aware(
             datetime.combine(target_day, start_time),
             timezone.get_current_timezone(),
         )
-        return Appointment.objects.create(
+        return Appointment(
             client=client,
             service=service,
             start_at=start_at,
@@ -28,13 +30,291 @@ class AppEntryPointViewTests(TestCase):
             status=status,
         )
 
-    def _create_weekly_availability(self, target_day, slot_times):
+    def _create_appointment(self, client, service, target_day, start_time, status):
+        appointment = self._build_appointment(client, service, target_day, start_time, status)
+        appointment.save()
+        return appointment
+
+    def _create_weekly_availability(self, target_day, slot_times, capacity=2):
         for slot_time in slot_times:
-            WeeklyAvailability.objects.create(weekday=target_day.weekday(), slot_time=slot_time)
+            WeeklyAvailability.objects.create(
+                weekday=target_day.weekday(),
+                slot_time=slot_time,
+                capacity=capacity,
+            )
 
     def _create_block(self, target_day, slot_time, label="Bloqueo puntual"):
         return AvailabilityBlock.objects.create(day=target_day, slot_time=slot_time, label=label)
 
+
+class AppointmentSlotValidationTests(AgendaBaseTestCase):
+    def test_valid_appointment_in_available_slot_can_be_created(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("11:00",), capacity=2)
+
+        appointment = self._build_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        appointment.save()
+
+        self.assertEqual(Appointment.objects.count(), 1)
+
+    def test_appointment_in_blocked_slot_is_rejected(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("11:00",), capacity=2)
+        self._create_block(today, "11:00", label="Bloqueo interno")
+
+        appointment = self._build_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.PENDING,
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            appointment.save()
+
+        self.assertIn("bloqueado", str(raised.exception))
+
+    def test_appointment_outside_availability_is_rejected(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("10:00",), capacity=2)
+
+        appointment = self._build_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.PENDING,
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            appointment.save()
+
+        self.assertIn("fuera de la disponibilidad", str(raised.exception))
+
+    def test_multiple_appointments_are_allowed_until_slot_capacity(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("11:00",), capacity=2)
+
+        first = self._build_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        second = self._build_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(11, 0),
+            Appointment.Status.PENDING,
+        )
+
+        first.save()
+        second.save()
+
+        self.assertEqual(Appointment.objects.count(), 2)
+        self.assertEqual(Appointment.active_slot_appointments_count(today, "11:00"), 2)
+
+    def test_appointment_is_rejected_when_slot_capacity_is_exceeded(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("11:00",), capacity=2)
+        self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        self._create_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(11, 0),
+            Appointment.Status.PENDING,
+        )
+
+        third = self._build_appointment(
+            self.tertiary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            third.save()
+
+        self.assertIn("capacidad maxima", str(raised.exception))
+
+
+class AppointmentFlowViewTests(AgendaBaseTestCase):
+    def _appointment_form_data(self, **overrides):
+        today = timezone.localdate()
+        data = {
+            "client": self.primary_client.pk,
+            "service": self.review_service.pk,
+            "day": today.isoformat(),
+            "slot_time": "11:00",
+            "status": Appointment.Status.PENDING,
+            "internal_notes": "Nota breve",
+        }
+        data.update(overrides)
+        return data
+
+    def test_create_view_can_create_a_valid_appointment(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("11:00",), capacity=2)
+
+        response = self.client.post(reverse("core:appointment_create"), self._appointment_form_data())
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Appointment.objects.count(), 1)
+        appointment = Appointment.objects.get()
+        self.assertEqual(appointment.slot_day, today)
+        self.assertEqual(appointment.slot_time, "11:00")
+
+    def test_create_view_uses_agenda_layout_structure_for_new_screen(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=2)
+        self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        response = self.client.get(
+            reverse("core:appointment_create"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="agenda-layout"')
+        self.assertContains(response, 'class="agenda-month"')
+        self.assertContains(response, 'class="agenda-panel appointment-create-panel"')
+        self.assertContains(response, "Nueva cita")
+        self.assertContains(response, "Elige un día y prepara la cita.")
+        self.assertContains(response, "Tramos del día")
+        self.assertContains(response, 'class="appointment-create-panel__form-fields"')
+        self.assertContains(response, 'type="hidden" name="day"')
+        self.assertNotContains(response, "Formulario")
+        self.assertNotContains(response, 'class="eyebrow agenda-header__eyebrow">Agenda operativa')
+        self.assertNotContains(response, "Nueva cita · contexto de agenda")
+        self.assertNotContains(response, "El tramo sigue indicandose desde el formulario.")
+        self.assertNotContains(response, "hx-get=")
+        self.assertFalse(response.context["calendar_hx_enabled"])
+        self.assertEqual(response.context["calendar_base_url"], reverse("core:appointment_create"))
+
+    def test_create_view_rejects_blocked_slot(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("11:00",), capacity=2)
+        self._create_block(today, "11:00", label="Bloqueo interno")
+
+        response = self.client.post(reverse("core:appointment_create"), self._appointment_form_data())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "bloqueado")
+        self.assertEqual(Appointment.objects.count(), 0)
+
+    def test_create_view_rejects_slot_outside_availability(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("10:00",), capacity=2)
+
+        response = self.client.post(reverse("core:appointment_create"), self._appointment_form_data())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "fuera de la disponibilidad")
+        self.assertEqual(Appointment.objects.count(), 0)
+
+    def test_create_view_rejects_complete_slot(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("11:00",), capacity=2)
+        self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        self._create_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(11, 0),
+            Appointment.Status.PENDING,
+        )
+
+        response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(client=self.tertiary_client.pk),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "capacidad maxima")
+        self.assertEqual(Appointment.objects.count(), 2)
+
+    def test_update_view_keeps_validation_and_allows_valid_edit(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=1)
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        self._create_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(10, 0),
+            Appointment.Status.PENDING,
+        )
+
+        blocked_response = self.client.post(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            self._appointment_form_data(
+                client=appointment.client_id,
+                service=appointment.service_id,
+                day=today.isoformat(),
+                slot_time="10:00",
+                status=appointment.status,
+                internal_notes="Intento en tramo completo",
+            ),
+        )
+
+        self.assertEqual(blocked_response.status_code, 200)
+        self.assertContains(blocked_response, "capacidad maxima")
+
+        valid_response = self.client.post(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            self._appointment_form_data(
+                client=appointment.client_id,
+                service=self.control_service.pk,
+                day=today.isoformat(),
+                slot_time="11:00",
+                status=Appointment.Status.PENDING,
+                internal_notes="Cambio valido",
+            ),
+        )
+
+        self.assertEqual(valid_response.status_code, 302)
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.slot_time, "11:00")
+        self.assertEqual(appointment.status, Appointment.Status.PENDING)
+        self.assertEqual(appointment.internal_notes, "Cambio valido")
+
+
+class AppEntryPointViewTests(AgendaBaseTestCase):
     def _day_context(self, response, target_day):
         for week in response.context["agenda_weeks"]:
             for week_day in week:
@@ -52,7 +332,7 @@ class AppEntryPointViewTests(TestCase):
         today = timezone.localdate()
         self._create_weekly_availability(today, ("09:00", "10:00", "11:00", "12:00", "16:00", "17:00"))
         self._create_block(today, "16:00", label="Bloqueo interno")
-        self._create_appointment(
+        first_appointment = self._create_appointment(
             self.primary_client,
             self.review_service,
             today,
@@ -63,7 +343,7 @@ class AppEntryPointViewTests(TestCase):
             self.secondary_client,
             self.control_service,
             today,
-            time(10, 30),
+            time(10, 0),
             Appointment.Status.PENDING,
         )
         self._create_appointment(
@@ -88,16 +368,63 @@ class AppEntryPointViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Claudia Real")
-        self.assertContains(response, "10:30")
+        self.assertContains(response, "10:00")
         self.assertContains(response, "Bloqueo interno")
         self.assertContains(response, "Disponible")
         self.assertContains(response, "Fuera de disponibilidad")
+        self.assertContains(response, reverse("core:appointment_create"))
+        self.assertContains(response, reverse("core:appointment_update", args=[first_appointment.pk]))
+        self.assertContains(response, "pendientes y confirmadas del día")
+        self.assertContains(response, "tramos ocupados del día")
+        self.assertContains(response, "siguen visibles en el panel")
+        self.assertNotContains(response, response.context["selected_day_summary"])
+        self.assertNotContains(response, "pending + confirmed del dia")
 
         metrics = {metric["label"]: metric["value"] for metric in response.context["agenda_metrics"]}
         self.assertEqual(metrics["Citas activas"], "03")
         self.assertEqual(metrics["Tramos con citas"], "04")
         self.assertEqual(metrics["Confirmadas"], "02")
         self.assertEqual(metrics["Canceladas"], "01")
+
+    def test_daily_panel_entries_are_clickable_and_do_not_render_edit_link_copy(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00",), capacity=3)
+        first_appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        second_appointment = self._create_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(9, 0),
+            Appointment.Status.PENDING,
+        )
+        third_appointment = self._create_appointment(
+            self.tertiary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        slot_09 = self._slot_context(response, "09:00")
+        self.assertEqual(len(slot_09["entries"]), 3)
+        self.assertEqual(slot_09["complete_label"], "Completo")
+        self.assertContains(response, 'class="agenda-slot__entry-card"', count=3)
+        self.assertContains(response, reverse("core:appointment_update", args=[first_appointment.pk]))
+        self.assertContains(response, reverse("core:appointment_update", args=[second_appointment.pk]))
+        self.assertContains(response, reverse("core:appointment_update", args=[third_appointment.pk]))
+        self.assertNotContains(response, 'class="agenda-slot__entry-link"')
+        self.assertNotIn(">Editar<", response.content.decode())
 
     def test_month_markers_keep_active_count_and_add_block_signal(self):
         today = timezone.localdate()
@@ -137,10 +464,9 @@ class AppEntryPointViewTests(TestCase):
             ["2 citas", "1 bloqueo"],
         )
 
-    def test_daily_panel_priority_is_appointment_then_block_then_available_then_unavailable(self):
+    def test_daily_panel_keeps_appointment_block_available_and_unavailable_states(self):
         today = timezone.localdate()
         self._create_weekly_availability(today, ("09:00", "10:00", "11:00"))
-        self._create_block(today, "09:00")
         self._create_block(today, "10:00")
         self._create_appointment(
             self.primary_client,
@@ -165,3 +491,41 @@ class AppEntryPointViewTests(TestCase):
         self.assertEqual(slot_10["blocked_label"], "Bloqueo puntual")
         self.assertEqual(slot_11["available_label"], "Disponible")
         self.assertEqual(slot_12["unavailable_label"], "Fuera de disponibilidad")
+
+    def test_daily_panel_marks_slot_as_complete_when_capacity_is_exhausted(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00", "10:00"), capacity=2)
+        self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        self._create_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(9, 0),
+            Appointment.Status.PENDING,
+        )
+        self._create_appointment(
+            self.tertiary_client,
+            self.review_service,
+            today,
+            time(10, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        slot_09 = self._slot_context(response, "09:00")
+        slot_10 = self._slot_context(response, "10:00")
+
+        self.assertEqual(slot_09["complete_label"], "Completo")
+        self.assertEqual(slot_10["complete_label"], "")
+        self.assertContains(response, "Completo")
+        self.assertNotContains(response, response.context["selected_day_summary"])

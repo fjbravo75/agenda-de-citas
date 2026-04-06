@@ -12,8 +12,8 @@
                 <h1 class="agenda-header__title">Agenda</h1>
             </div>
             <div class="page-actions">
-                <button class="button button--primary" type="button">Nueva cita</button>
-                <button class="button button--secondary" type="button">Hoy</button>
+                <a class="button button--primary" href="{% url 'core:appointment_create' %}?{{ selected_day_query }}">Nueva cita</a>
+                <a class="button button--secondary" href="?{{ today_query }}">Hoy</a>
             </div>
         </header>
     </section>

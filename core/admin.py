@@ -26,7 +26,7 @@ class AppointmentAdmin(admin.ModelAdmin):
 
 @admin.register(WeeklyAvailability)
 class WeeklyAvailabilityAdmin(admin.ModelAdmin):
-    list_display = ("weekday", "slot_time")
+    list_display = ("weekday", "slot_time", "capacity")
     list_filter = ("weekday",)
     search_fields = ("slot_time",)
 

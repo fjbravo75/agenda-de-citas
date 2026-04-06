@@ -4,14 +4,23 @@ from urllib.parse import urlencode
 
 from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
+from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from django.utils import timezone
-from django.views.generic import TemplateView
+from django.views.generic import FormView, TemplateView
 
-from .models import AGENDA_SLOT_TIMES, Appointment, AvailabilityBlock, WeeklyAvailability
+from .forms import AppointmentForm
+from .models import (
+    AGENDA_SLOT_TIMES,
+    Appointment,
+    AvailabilityBlock,
+    WeeklyAvailability,
+    agenda_assigned_slot_time,
+)
 
 
-AGENDA_SLOT_VALUES = tuple(time.fromisoformat(value) for value in AGENDA_SLOT_TIMES)
-ACTIVE_CALENDAR_STATUS_KEYS = {Appointment.Status.PENDING, Appointment.Status.CONFIRMED}
+ACTIVE_CALENDAR_STATUS_KEYS = set(Appointment.active_statuses())
 
 WEEKDAY_SHORT_LABELS = ("Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom")
 WEEKDAY_NAMES = ("Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo")
@@ -71,6 +80,42 @@ def _navigation_query(year, month, selected_day_number, delta):
     return _query_string(target_year, target_month, target_day)
 
 
+def _build_calendar_context(
+    *,
+    visible_year,
+    visible_month,
+    selected_day,
+    real_today,
+    month_summary,
+    calendar_base_url,
+    calendar_hx_enabled,
+    calendar_hx_target_id="",
+):
+    return {
+        "weekday_labels": WEEKDAY_SHORT_LABELS,
+        "agenda_weeks": _build_agenda_weeks(
+            visible_year,
+            visible_month,
+            selected_day,
+            real_today,
+            month_summary,
+        ),
+        "visible_month_title": _format_month_title(visible_year, visible_month),
+        "previous_month_query": _navigation_query(visible_year, visible_month, selected_day.day, -1),
+        "next_month_query": _navigation_query(visible_year, visible_month, selected_day.day, 1),
+        "selected_day_iso": selected_day.isoformat(),
+        "selected_day_query": _query_string(selected_day.year, selected_day.month, selected_day.day),
+        "today_query": _query_string(real_today.year, real_today.month, real_today.day),
+        "calendar_base_url": calendar_base_url,
+        "calendar_hx_enabled": calendar_hx_enabled,
+        "calendar_hx_target_id": calendar_hx_target_id,
+    }
+
+
+def _agenda_url_for_day(target_day):
+    return f"{reverse('core:app_entrypoint')}?{_query_string(target_day.year, target_day.month, target_day.day)}"
+
+
 def _format_count_label(count, singular, plural):
     return f"{count} {singular if count == 1 else plural}"
 
@@ -96,27 +141,31 @@ def _format_today_context_label(target_day):
 
 
 def _empty_timeline_slots():
-    return [{"time": slot_time, "entries": [], "blocked_label": ""} for slot_time in AGENDA_SLOT_TIMES]
+    return [
+        {
+            "time": slot_time,
+            "entries": [],
+            "blocked_label": "",
+            "complete_label": "",
+            "available_label": "",
+            "unavailable_label": "",
+        }
+        for slot_time in AGENDA_SLOT_TIMES
+    ]
 
 
-def _slot_label_for_datetime(target_datetime):
-    local_time = timezone.localtime(target_datetime).time().replace(second=0, microsecond=0)
-    selected_slot = AGENDA_SLOT_TIMES[0]
-    for index, slot_time in enumerate(AGENDA_SLOT_VALUES):
-        if local_time < slot_time:
-            return AGENDA_SLOT_TIMES[index - 1] if index > 0 else selected_slot
-        selected_slot = AGENDA_SLOT_TIMES[index]
-    return selected_slot
-
-
-def _build_entry_from_appointment(appointment):
-    local_start = timezone.localtime(appointment.start_at)
+def _build_entry_from_appointment(appointment, selected_day):
+    slot_time = agenda_assigned_slot_time(appointment.start_at)
+    edit_query = _query_string(selected_day.year, selected_day.month, selected_day.day)
     return {
+        "id": appointment.pk,
         "name": appointment.client.name,
         "service": appointment.service.name,
-        "service_label": f"{local_start:%H:%M} · {appointment.service.name}",
+        "service_label": appointment.service.name,
         "status": appointment.get_status_display(),
         "status_key": appointment.status,
+        "edit_url": f"{reverse('core:appointment_update', args=[appointment.pk])}?{edit_query}",
+        "edit_label": f"Editar cita de {appointment.client.name}",
     }
 
 
@@ -135,6 +184,12 @@ def _available_slots_for_day(target_day):
     )
 
 
+def _available_slot_capacities_for_day(target_day):
+    return dict(
+        WeeklyAvailability.objects.filter(weekday=target_day.weekday()).values_list("slot_time", "capacity")
+    )
+
+
 def _blocked_slots_for_day(target_day):
     return {
         block.slot_time: block.label or "Bloqueo puntual"
@@ -145,32 +200,33 @@ def _blocked_slots_for_day(target_day):
 def _build_timeline_slots(target_day, appointments):
     slots = _empty_timeline_slots()
     slot_map = {slot["time"]: slot for slot in slots}
+    available_slot_capacities = _available_slot_capacities_for_day(target_day)
     available_slots = _available_slots_for_day(target_day)
     blocked_slots = _blocked_slots_for_day(target_day)
 
     for appointment in appointments:
-        slot_map[_slot_label_for_datetime(appointment.start_at)]["entries"].append(
-            _build_entry_from_appointment(appointment)
+        slot_map[agenda_assigned_slot_time(appointment.start_at)]["entries"].append(
+            _build_entry_from_appointment(appointment, target_day)
         )
 
     for slot in slots:
         if slot["entries"]:
-            slot["available_label"] = ""
-            slot["unavailable_label"] = ""
+            active_entries = sum(
+                1 for entry in slot["entries"] if entry["status_key"] in ACTIVE_CALENDAR_STATUS_KEYS
+            )
+            slot_capacity = available_slot_capacities.get(slot["time"])
+            if slot_capacity and active_entries >= slot_capacity and slot["time"] not in blocked_slots:
+                slot["complete_label"] = "Completo"
             continue
 
         if slot["time"] in blocked_slots:
             slot["blocked_label"] = blocked_slots[slot["time"]]
-            slot["available_label"] = ""
-            slot["unavailable_label"] = ""
             continue
 
         if slot["time"] in available_slots:
             slot["available_label"] = "Disponible"
-            slot["unavailable_label"] = ""
             continue
 
-        slot["available_label"] = ""
         slot["unavailable_label"] = "Fuera de disponibilidad"
 
     return slots
@@ -178,6 +234,7 @@ def _build_timeline_slots(target_day, appointments):
 
 def _build_day_summary(timeline_slots):
     slots_with_appointments = sum(1 for slot in timeline_slots if slot["entries"])
+    complete_slots = sum(1 for slot in timeline_slots if slot.get("complete_label"))
     blocked_slots = sum(1 for slot in timeline_slots if not slot["entries"] and slot["blocked_label"])
     available_slots = sum(1 for slot in timeline_slots if slot.get("available_label"))
     unavailable_slots = sum(1 for slot in timeline_slots if slot.get("unavailable_label"))
@@ -187,6 +244,8 @@ def _build_day_summary(timeline_slots):
         summary_parts.append(
             _format_count_label(slots_with_appointments, "tramo con cita", "tramos con cita")
         )
+    if complete_slots:
+        summary_parts.append(_format_count_label(complete_slots, "tramo completo", "tramos completos"))
     if blocked_slots:
         summary_parts.append(_format_count_label(blocked_slots, "bloqueo", "bloqueos"))
     if available_slots:
@@ -239,22 +298,22 @@ def _build_agenda_metrics(timeline_slots):
         {
             "label": "Citas activas",
             "value": f"{active_entries:02d}",
-            "meta": "pending + confirmed del dia",
+            "meta": "pendientes y confirmadas del día",
         },
         {
             "label": "Tramos con citas",
             "value": f"{occupied_slots:02d}",
-            "meta": "bloques visuales con actividad",
+            "meta": "tramos ocupados del día",
         },
         {
             "label": "Confirmadas",
             "value": f"{confirmed_entries:02d}",
-            "meta": "citas con estado confirmado",
+            "meta": "citas ya confirmadas",
         },
         {
             "label": "Canceladas",
             "value": f"{cancelled_entries:02d}",
-            "meta": "visibles solo en el panel diario",
+            "meta": "siguen visibles en el panel",
         },
     ]
 
@@ -393,25 +452,122 @@ class AppEntryPointView(TemplateView):
         today_panel = _build_day_panel(real_today)
         month_summary = _month_summary(visible_year, visible_month)
         context.update(
+            _build_calendar_context(
+                visible_year=visible_year,
+                visible_month=visible_month,
+                selected_day=selected_day,
+                real_today=real_today,
+                month_summary=month_summary,
+                calendar_base_url=reverse("core:app_entrypoint"),
+                calendar_hx_enabled=True,
+                calendar_hx_target_id="agenda-interactive-region",
+            )
+        )
+        context.update(
             {
                 "agenda_metrics": _build_agenda_metrics(today_panel["agenda_timeline_slots"]),
                 "today_context_label": _format_today_context_label(real_today),
-                "weekday_labels": WEEKDAY_SHORT_LABELS,
-                "agenda_weeks": _build_agenda_weeks(
-                    visible_year,
-                    visible_month,
-                    selected_day,
-                    real_today,
-                    month_summary,
-                ),
-                "visible_month_title": _format_month_title(visible_year, visible_month),
-                "previous_month_query": _navigation_query(visible_year, visible_month, selected_day.day, -1),
-                "next_month_query": _navigation_query(visible_year, visible_month, selected_day.day, 1),
-                "selected_day_iso": selected_day.isoformat(),
             }
         )
         context.update(day_panel)
         return context
+
+
+class AppointmentFormViewBase(FormView):
+    template_name = "core/appointment_form.html"
+    form_class = AppointmentForm
+
+    def get_appointment(self):
+        return None
+
+    def get_selected_day(self):
+        if self.request.method == "POST":
+            raw_day = self.request.POST.get("day")
+            if raw_day:
+                try:
+                    return date.fromisoformat(raw_day)
+                except ValueError:
+                    pass
+
+        raw_year = self.request.GET.get("year")
+        raw_month = self.request.GET.get("month")
+        raw_day = self.request.GET.get("day")
+        if raw_year is not None and raw_month is not None and raw_day is not None:
+            _, _, selected_day, _ = _resolve_calendar_state(self.request)
+            return selected_day
+
+        appointment = self.get_appointment()
+        if appointment is not None:
+            return appointment.slot_day
+        return _real_today()
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["instance"] = self.get_appointment()
+        kwargs["initial_day"] = self.get_selected_day()
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        appointment = self.get_appointment()
+        selected_day = self.get_selected_day()
+        is_edit = appointment is not None
+        context.update(
+            {
+                "page_title": "Editar cita" if is_edit else "Nueva cita",
+                "page_description": (
+                    "Ajusta cliente, servicio, fecha y tramo. La validacion sigue la disponibilidad,"
+                    " los bloqueos y la capacidad real del tramo."
+                ),
+                "submit_label": "Guardar cambios" if is_edit else "Guardar cita",
+                "back_url": _agenda_url_for_day(selected_day),
+                "is_edit": is_edit,
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        appointment = form.save()
+        return HttpResponseRedirect(_agenda_url_for_day(appointment.slot_day))
+
+
+class AppointmentCreateView(AppointmentFormViewBase):
+    template_name = "core/appointment_create_screen.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        selected_day = self.get_selected_day()
+        visible_year = selected_day.year
+        visible_month = selected_day.month
+        real_today = _real_today()
+        month_summary = _month_summary(visible_year, visible_month)
+        day_panel = _build_day_panel(selected_day)
+        context.update(
+            _build_calendar_context(
+                visible_year=visible_year,
+                visible_month=visible_month,
+                selected_day=selected_day,
+                real_today=real_today,
+                month_summary=month_summary,
+                calendar_base_url=reverse("core:appointment_create"),
+                calendar_hx_enabled=False,
+            )
+        )
+        context.update(day_panel)
+        context.update(
+            {
+                "create_screen_context_label": "Nueva cita · contexto de agenda",
+                "slot_selection_message": "Selecciona un tramo disponible para preparar la cita.",
+            }
+        )
+        return context
+
+
+class AppointmentUpdateView(AppointmentFormViewBase):
+    def get_appointment(self):
+        if not hasattr(self, "_appointment"):
+            self._appointment = get_object_or_404(Appointment, pk=self.kwargs["pk"])
+        return self._appointment
 
 
 class UIValidationView(TemplateView):

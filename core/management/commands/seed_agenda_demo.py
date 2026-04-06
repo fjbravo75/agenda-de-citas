@@ -88,7 +88,7 @@ class Command(BaseCommand):
                 {"name": "Control", "duration_minutes": 30, "color": "#6D7A8C"},
             ],
             "weekly_availability": [
-                {"weekday": weekday, "slot_time": slot_time}
+                {"weekday": weekday, "slot_time": slot_time, "capacity": 2}
                 for weekday in Weekday.values
                 for slot_time in ("09:00", "10:00", "11:00", "12:00", "16:00", "17:00", "18:00")
             ],
@@ -109,7 +109,7 @@ class Command(BaseCommand):
                     "client": "Diego Lara",
                     "service": "Control",
                     "day": demo_days["today"],
-                    "start_time": time(10, 15),
+                    "start_time": time(10, 0),
                     "status": Appointment.Status.PENDING,
                 },
                 {
@@ -138,7 +138,7 @@ class Command(BaseCommand):
                     "client": "Sofia Marquez",
                     "service": "Control",
                     "day": demo_days["next_day"],
-                    "start_time": time(10, 30),
+                    "start_time": time(10, 0),
                     "status": Appointment.Status.PENDING,
                 },
                 {
@@ -159,7 +159,7 @@ class Command(BaseCommand):
                     "client": "Paula Martin",
                     "service": "Seguimiento",
                     "day": demo_days["one_week"],
-                    "start_time": time(12, 30),
+                    "start_time": time(12, 0),
                     "status": Appointment.Status.PENDING,
                 },
             ],

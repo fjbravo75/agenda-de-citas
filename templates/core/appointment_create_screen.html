@@ -32,6 +32,7 @@
                     <form method="post" class="section-stack appointment-create-panel__form">
                         {% csrf_token %}
                         {{ form.day.as_hidden }}
+                        <input type="hidden" name="next" value="{{ back_url }}">
 
                         <section class="appointment-create-panel__block">
                             <div class="appointment-create-panel__block-header">

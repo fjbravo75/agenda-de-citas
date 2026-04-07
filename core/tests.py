@@ -337,6 +337,34 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
             r'class="[^"]*appointment-slot-row--selected[^"]*"[^>]*data-slot-value="09:00"[^>]*aria-pressed="true"',
         )
 
+    def test_create_view_prefills_selected_day_and_slot_from_querystring(self):
+        today = timezone.localdate()
+        agenda_query = urlencode({"year": today.year, "month": today.month, "day": today.day})
+        next_url = f"{reverse('core:app_entrypoint')}?{agenda_query}"
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=2)
+
+        response = self.client.get(
+            reverse("core:appointment_create"),
+            {
+                "year": today.year,
+                "month": today.month,
+                "day": today.day,
+                "slot_time": "10:00",
+                "next": next_url,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["form"]["day"].value(), today)
+        self.assertEqual(response.context["form"]["slot_time"].value(), "10:00")
+        self.assertEqual(response.context["back_url"], next_url)
+        self.assertContains(response, 'value="10:00"')
+        self.assertContains(response, 'name="next"')
+        self.assertRegex(
+            response.content.decode(),
+            r'class="[^"]*appointment-slot-row--selected[^"]*"[^>]*data-slot-value="10:00"[^>]*aria-pressed="true"',
+        )
+
     def test_create_view_renders_non_bookable_slots_as_inert_and_keeps_bound_selection_on_invalid_post(self):
         today = timezone.localdate()
         self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=1)
@@ -379,6 +407,34 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
             invalid_content,
             r'class="[^"]*appointment-slot-row--inactive[^"]*appointment-slot-row--complete[^"]*appointment-slot-row--selected[^"]*"[^>]*data-slot-value="11:00"[^>]*aria-disabled="true"',
         )
+
+    def test_create_view_keeps_next_back_url_on_invalid_post(self):
+        today = timezone.localdate()
+        agenda_query = urlencode({"year": today.year, "month": today.month, "day": today.day})
+        next_url = f"{reverse('core:app_entrypoint')}?{agenda_query}"
+        self._create_weekly_availability(today, ("09:00",), capacity=1)
+        self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(
+                client=self.secondary_client.pk,
+                day=today.isoformat(),
+                slot_time="09:00",
+                next=next_url,
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "capacidad maxima")
+        self.assertEqual(response.context["back_url"], next_url)
+        self.assertContains(response, 'name="next"')
 
     def test_create_view_rejects_blocked_slot(self):
         today = timezone.localdate()
@@ -553,6 +609,34 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         self.assertContains(response, 'data-delete-trigger')
         self.assertContains(response, 'data-cancel-notice')
         self.assertContains(response, 'data-delete-confirmation')
+
+    def test_update_view_shows_client_link_with_next_to_current_context(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00",), capacity=1)
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        current_path = (
+            f"{reverse('core:appointment_update', args=[appointment.pk])}"
+            f"?{urlencode({'year': today.year, 'month': today.month, 'day': today.day})}"
+        )
+        expected_client_url = (
+            f"{reverse('core:client_detail', args=[appointment.client_id])}"
+            f"?{urlencode({'next': current_path})}"
+        )
+
+        response = self.client.get(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ver cliente")
+        self.assertContains(response, expected_client_url)
 
     def test_update_view_keeps_contextual_calendar_tied_to_appointment_day_on_get(self):
         today = timezone.localdate()
@@ -770,6 +854,113 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         self.assertEqual(Appointment.objects.filter(status=Appointment.Status.CANCELLED).count(), 0)
 
 
+class ClientDetailViewTests(AgendaBaseTestCase):
+    def _client_detail_url(self, client, next_url=None):
+        base_url = reverse("core:client_detail", args=[client.pk])
+        if not next_url:
+            return base_url
+        return f"{base_url}?{urlencode({'next': next_url})}"
+
+    def test_client_detail_view_returns_200(self):
+        response = self.client.get(self._client_detail_url(self.primary_client))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_client_detail_view_renders_client_base_data(self):
+        self.primary_client.phone = "+34 600 111 111"
+        self.primary_client.email = "claudia@example.com"
+        self.primary_client.notes = "Cliente habitual"
+        self.primary_client.save(update_fields=["phone", "email", "notes"])
+
+        response = self.client.get(self._client_detail_url(self.primary_client))
+
+        self.assertContains(response, self.primary_client.name)
+        self.assertContains(response, self.primary_client.phone)
+        self.assertContains(response, self.primary_client.email)
+        self.assertContains(response, self.primary_client.notes)
+
+    def test_client_detail_view_renders_history_in_descending_order_with_active_and_cancelled_appointments(self):
+        today = timezone.localdate()
+        previous_day = today - timedelta(days=1)
+        evaluation_service = Service.objects.create(name="Evaluacion", duration_minutes=60, color="#AE4C42")
+
+        self._create_weekly_availability(today, ("09:00", "12:00"), capacity=2)
+        self._create_weekly_availability(previous_day, ("10:00",), capacity=2)
+        newest_appointment = self._create_appointment(
+            self.primary_client,
+            evaluation_service,
+            today,
+            time(12, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        middle_appointment = self._create_appointment(
+            self.primary_client,
+            self.control_service,
+            today,
+            time(9, 0),
+            Appointment.Status.PENDING,
+        )
+        oldest_appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            previous_day,
+            time(10, 0),
+            Appointment.Status.CANCELLED,
+        )
+
+        response = self.client.get(self._client_detail_url(self.primary_client))
+        content = response.content.decode()
+
+        self.assertContains(response, "Evaluacion")
+        self.assertContains(response, "Control")
+        self.assertContains(response, "Revision")
+        self.assertContains(response, "Confirmada")
+        self.assertContains(response, "Pendiente")
+        self.assertContains(response, "Cancelada")
+        history_urls = [item["edit_url"] for item in response.context["client_history"]]
+        self.assertEqual(
+            history_urls,
+            [
+                f"{reverse('core:appointment_update', args=[newest_appointment.pk])}"
+                f"?{urlencode({'year': today.year, 'month': today.month, 'day': today.day})}",
+                f"{reverse('core:appointment_update', args=[middle_appointment.pk])}"
+                f"?{urlencode({'year': today.year, 'month': today.month, 'day': today.day})}",
+                f"{reverse('core:appointment_update', args=[oldest_appointment.pk])}"
+                f"?{urlencode({'year': previous_day.year, 'month': previous_day.month, 'day': previous_day.day})}",
+            ],
+        )
+        self.assertLess(content.index("Evaluacion"), content.index("Control"))
+        self.assertLess(content.index("Control"), content.index("Revision"))
+
+    def test_client_detail_view_uses_next_for_back_link(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00",), capacity=1)
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        next_url = (
+            f"{reverse('core:appointment_update', args=[appointment.pk])}"
+            f"?{urlencode({'year': today.year, 'month': today.month, 'day': today.day})}"
+        )
+
+        response = self.client.get(self._client_detail_url(self.primary_client, next_url=next_url))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["back_url"], next_url)
+        self.assertContains(response, reverse("core:appointment_update", args=[appointment.pk]))
+
+    def test_client_detail_view_falls_back_to_app_when_next_is_missing(self):
+        response = self.client.get(self._client_detail_url(self.primary_client))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["back_url"], reverse("core:app_entrypoint"))
+        self.assertContains(response, f'href="{reverse("core:app_entrypoint")}"')
+
+
 class AppEntryPointViewTests(AgendaBaseTestCase):
     def _day_context(self, response, target_day):
         for week in response.context["agenda_weeks"]:
@@ -843,8 +1034,15 @@ class AppEntryPointViewTests(AgendaBaseTestCase):
         self.assertEqual(metrics["Confirmadas"], "02")
         self.assertEqual(metrics["Canceladas"], "00")
 
-    def test_daily_panel_entries_are_clickable_and_do_not_render_edit_link_copy(self):
+    def test_daily_panel_complete_slot_keeps_edit_links_and_hides_create_action(self):
         today = timezone.localdate()
+        agenda_query = urlencode({"year": today.year, "month": today.month, "day": today.day})
+        expected_next = f"{reverse('core:app_entrypoint')}?{agenda_query}"
+        expected_create_url = (
+            f"{reverse('core:appointment_create')}"
+            f"?{urlencode({'year': today.year, 'month': today.month, 'day': today.day, 'slot_time': '09:00', 'next': expected_next})}"
+        )
+        expected_create_href = expected_create_url.replace("&", "&amp;")
         self._create_weekly_availability(today, ("09:00",), capacity=3)
         first_appointment = self._create_appointment(
             self.primary_client,
@@ -883,7 +1081,9 @@ class AppEntryPointViewTests(AgendaBaseTestCase):
         self.assertContains(response, reverse("core:appointment_update", args=[third_appointment.pk]))
         self.assertNotContains(response, 'class="agenda-slot__entry-link"')
         self.assertNotContains(response, 'class="agenda-slot__state agenda-slot__state--complete"')
+        self.assertNotContains(response, expected_create_href)
         self.assertNotIn(">Editar<", response.content.decode())
+        self.assertEqual(slot_09["create_url"], "")
 
     def test_month_markers_keep_active_count_and_add_block_signal(self):
         today = timezone.localdate()
@@ -922,6 +1122,67 @@ class AppEntryPointViewTests(AgendaBaseTestCase):
             [marker["label"] for marker in day_context["markers"]],
             ["2 citas", "1 bloqueo"],
         )
+
+    def test_daily_panel_empty_slot_exposes_create_action_with_contextual_url(self):
+        today = timezone.localdate()
+        agenda_query = urlencode({"year": today.year, "month": today.month, "day": today.day})
+        expected_next = f"{reverse('core:app_entrypoint')}?{agenda_query}"
+        expected_create_url = (
+            f"{reverse('core:appointment_create')}"
+            f"?{urlencode({'year': today.year, 'month': today.month, 'day': today.day, 'slot_time': '10:00', 'next': expected_next})}"
+        )
+        expected_create_href = expected_create_url.replace("&", "&amp;")
+        self._create_weekly_availability(today, ("10:00",), capacity=2)
+
+        response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        slot_10 = self._slot_context(response, "10:00")
+
+        self.assertEqual(slot_10["create_url"], expected_create_url)
+        self.assertEqual(slot_10["create_label"], "Nueva cita")
+        self.assertContains(response, expected_create_href)
+
+    def test_daily_panel_partially_occupied_slot_keeps_entries_and_create_action(self):
+        today = timezone.localdate()
+        agenda_query = urlencode({"year": today.year, "month": today.month, "day": today.day})
+        expected_next = f"{reverse('core:app_entrypoint')}?{agenda_query}"
+        expected_create_url = (
+            f"{reverse('core:appointment_create')}"
+            f"?{urlencode({'year': today.year, 'month': today.month, 'day': today.day, 'slot_time': '09:00', 'next': expected_next})}"
+        )
+        expected_create_href = expected_create_url.replace("&", "&amp;")
+        self._create_weekly_availability(today, ("09:00",), capacity=3)
+        first_appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        second_appointment = self._create_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(9, 0),
+            Appointment.Status.PENDING,
+        )
+
+        response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        slot_09 = self._slot_context(response, "09:00")
+
+        self.assertEqual(len(slot_09["entries"]), 2)
+        self.assertEqual(slot_09["complete_label"], "")
+        self.assertEqual(slot_09["create_url"], expected_create_url)
+        self.assertContains(response, reverse("core:appointment_update", args=[first_appointment.pk]))
+        self.assertContains(response, reverse("core:appointment_update", args=[second_appointment.pk]))
+        self.assertContains(response, expected_create_href)
 
     def test_daily_panel_keeps_appointment_block_available_and_unavailable_states(self):
         today = timezone.localdate()

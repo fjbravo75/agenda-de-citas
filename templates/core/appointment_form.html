@@ -13,6 +13,9 @@
                 <p class="agenda-header__subtitle">Cambia los datos de la cita y guarda cuando lo tengas listo.</p>
             </div>
             <div class="page-actions">
+                {% if client_detail_url %}
+                <a class="button button--secondary" href="{{ client_detail_url }}">Ver cliente</a>
+                {% endif %}
                 <a class="button button--secondary" href="{{ back_url }}">Volver a la agenda</a>
             </div>
         </header>

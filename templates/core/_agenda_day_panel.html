@@ -33,8 +33,14 @@
                     </div>
                     {% endfor %}
                 </div>
+                {% if slot.create_url %}
+                <a class="agenda-slot__state agenda-slot__state--available" href="{{ slot.create_url }}">{{ slot.create_label }}</a>
+                {% endif %}
                 {% elif slot.blocked_label %}
                 <span class="agenda-slot__state agenda-slot__state--blocked">{{ slot.blocked_label }}</span>
+                {% elif slot.create_url %}
+                <span class="agenda-slot__state agenda-slot__state--available">{{ slot.available_label }}</span>
+                <a class="agenda-slot__state agenda-slot__state--available" href="{{ slot.create_url }}">{{ slot.create_label }}</a>
                 {% elif slot.available_label %}
                 <span class="agenda-slot__state agenda-slot__state--available">{{ slot.available_label }}</span>
                 {% else %}

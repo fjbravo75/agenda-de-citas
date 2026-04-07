@@ -1,0 +1,87 @@
+{% extends "base_app.html" %}
+
+{% block title %}{{ client_obj.name }} | Agenda de Citas{% endblock %}
+
+{% block content %}
+<section class="section-stack">
+    <header class="page-header">
+        <div class="page-header__copy">
+            <p class="eyebrow">Cliente</p>
+            <h1>{{ client_obj.name }}</h1>
+            <p class="text-secondary">Ficha minima de apoyo con datos base e historial de citas.</p>
+        </div>
+        <div class="page-actions">
+            <a class="button button--secondary" href="{{ back_url }}">Volver</a>
+        </div>
+    </header>
+</section>
+
+<section class="section-stack">
+    <div class="card-grid card-grid--two">
+        <article class="section-surface">
+            <div class="stack-sm">
+                <div>
+                    <p class="detail-panel__label">Telefono</p>
+                    <p>{{ client_obj.phone|default:"Sin telefono registrado." }}</p>
+                </div>
+                <div>
+                    <p class="detail-panel__label">Email</p>
+                    <p>{{ client_obj.email|default:"Sin email registrado." }}</p>
+                </div>
+            </div>
+        </article>
+
+        <article class="section-surface section-surface--subtle">
+            <div class="stack-sm">
+                <div>
+                    <p class="detail-panel__label">Notas</p>
+                    <p>{{ client_obj.notes|default:"Sin notas registradas." }}</p>
+                </div>
+            </div>
+        </article>
+    </div>
+</section>
+
+<section class="section-stack">
+    <article class="section-surface">
+        <div class="stack-sm">
+            <div>
+                <p class="eyebrow">Historial</p>
+                <h2>Citas del cliente</h2>
+            </div>
+
+            {% if client_history %}
+            <div class="table-wrap">
+                <table class="table table--compact">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Tramo</th>
+                            <th>Servicio</th>
+                            <th>Estado</th>
+                            <th>Accion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in client_history %}
+                        <tr>
+                            <td>{{ item.date_label }}</td>
+                            <td>{{ item.slot_time }}</td>
+                            <td>{{ item.service_label }}</td>
+                            <td><span class="badge badge--{{ item.status_key }}">{{ item.status_label }}</span></td>
+                            <td><a href="{{ item.edit_url }}">Editar cita</a></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <span class="empty-state__icon">Cliente</span>
+                <p>Este cliente todavia no tiene citas registradas.</p>
+            </div>
+            {% endif %}
+        </div>
+    </article>
+</section>
+{% endblock %}

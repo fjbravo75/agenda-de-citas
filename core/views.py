@@ -7,6 +7,7 @@ from django.db.models.functions import TruncDate
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from django.views.generic import FormView, TemplateView
 
@@ -15,6 +16,7 @@ from .models import (
     AGENDA_SLOT_TIMES,
     Appointment,
     AvailabilityBlock,
+    Client,
     agenda_assigned_slot_time,
     agenda_slot_booking_state,
 )
@@ -142,6 +144,36 @@ def _format_today_context_label(target_day):
     return f"Hoy · {target_day.day} {MONTH_NAMES[target_day.month]} {target_day.year}"
 
 
+def _format_compact_day(target_day):
+    return f"{target_day.day} {MONTH_NAMES[target_day.month]} {target_day.year}"
+
+
+def _safe_next_url(request):
+    raw_next = request.POST.get("next") or request.GET.get("next", "")
+    if raw_next and url_has_allowed_host_and_scheme(
+        raw_next,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return raw_next
+    return ""
+
+
+def _url_with_next(base_url, next_url):
+    if not next_url:
+        return base_url
+    separator = "&" if "?" in base_url else "?"
+    return f"{base_url}{separator}{urlencode({'next': next_url})}"
+
+
+def _appointment_create_url_for_slot(target_day, slot_time, next_url=""):
+    base_url = (
+        f"{reverse('core:appointment_create')}?"
+        f"{urlencode({'year': target_day.year, 'month': target_day.month, 'day': target_day.day, 'slot_time': slot_time})}"
+    )
+    return _url_with_next(base_url, next_url)
+
+
 def _empty_timeline_slots():
     return [
         {
@@ -155,6 +187,8 @@ def _empty_timeline_slots():
             "available_label": "",
             "unavailable_label": "",
             "can_book": False,
+            "create_url": "",
+            "create_label": "",
         }
         for slot_time in AGENDA_SLOT_TIMES
     ]
@@ -196,7 +230,7 @@ def _format_busy_slot_label(active_count, capacity):
     return f"{active_count} {active_label}"
 
 
-def _build_timeline_slots(target_day, appointments):
+def _build_timeline_slots(target_day, appointments, return_url=""):
     slots = _empty_timeline_slots()
     slot_map = {slot["time"]: slot for slot in slots}
     slot_state = agenda_slot_booking_state(target_day)
@@ -211,6 +245,14 @@ def _build_timeline_slots(target_day, appointments):
         slot["active_entries_count"] = state["active_count"]
         slot["capacity"] = state["capacity"]
         slot["can_book"] = state["can_book"]
+
+        if state["can_book"]:
+            slot["create_url"] = _appointment_create_url_for_slot(
+                target_day,
+                slot["time"],
+                next_url=return_url or _agenda_url_for_day(target_day),
+            )
+            slot["create_label"] = "Nueva cita"
 
         if slot["entries"]:
             if state["is_complete"]:
@@ -265,9 +307,9 @@ def _build_day_summary(timeline_slots):
     return _join_summary_parts(summary_parts)
 
 
-def _build_day_panel(selected_day):
+def _build_day_panel(selected_day, return_url=""):
     appointments = _appointments_for_day(selected_day)
-    timeline_slots = _build_timeline_slots(selected_day, appointments)
+    timeline_slots = _build_timeline_slots(selected_day, appointments, return_url=return_url)
     return {
         "selected_day_title": _format_day_title(selected_day),
         "selected_day_summary": _build_day_summary(timeline_slots),
@@ -450,7 +492,7 @@ class AppEntryPointView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         visible_year, visible_month, selected_day, real_today = _resolve_calendar_state(self.request)
-        day_panel = _build_day_panel(selected_day)
+        day_panel = _build_day_panel(selected_day, return_url=self.request.get_full_path())
         today_panel = _build_day_panel(real_today)
         month_summary = _month_summary(visible_year, visible_month)
         context.update(
@@ -507,13 +549,26 @@ class AppointmentFormViewBase(FormView):
         kwargs = super().get_form_kwargs()
         kwargs["instance"] = self.get_appointment()
         kwargs["initial_day"] = self.get_selected_day()
+        kwargs["initial_slot_time"] = self.get_initial_slot_time()
         return kwargs
+
+    def get_initial_slot_time(self):
+        raw_slot_time = self.request.GET.get("slot_time", "")
+        if raw_slot_time in AGENDA_SLOT_TIMES:
+            return raw_slot_time
+        return None
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         appointment = self.get_appointment()
         selected_day = self.get_selected_day()
         is_edit = appointment is not None
+        client_detail_url = ""
+        if appointment is not None and appointment.client_id:
+            client_detail_url = _url_with_next(
+                reverse("core:client_detail", args=[appointment.client_id]),
+                self.request.get_full_path(),
+            )
         context.update(
             {
                 "page_title": "Editar cita" if is_edit else "Nueva cita",
@@ -522,7 +577,8 @@ class AppointmentFormViewBase(FormView):
                     " los bloqueos y la capacidad real del tramo."
                 ),
                 "submit_label": "Guardar cambios" if is_edit else "Guardar cita",
-                "back_url": _agenda_url_for_day(selected_day),
+                "back_url": _safe_next_url(self.request) or _agenda_url_for_day(selected_day),
+                "client_detail_url": client_detail_url,
                 "is_edit": is_edit,
             }
         )
@@ -627,6 +683,48 @@ class AppointmentUpdateView(AppointmentFormViewBase):
 
     def _delete_mode_requested(self):
         return self.request.POST.get("delete_mode") == "true"
+
+
+class ClientDetailView(TemplateView):
+    template_name = "core/client_detail.html"
+
+    def get_client(self):
+        if not hasattr(self, "_client"):
+            self._client = get_object_or_404(Client, pk=self.kwargs["pk"])
+        return self._client
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        client = self.get_client()
+        next_url = _safe_next_url(self.request)
+        fallback_url = reverse("core:app_entrypoint")
+        history_items = []
+
+        appointments = client.appointments.select_related("service").order_by("-start_at", "-id")
+        for appointment in appointments:
+            slot_day = appointment.slot_day
+            edit_url = reverse("core:appointment_update", args=[appointment.pk])
+            if slot_day is not None:
+                edit_url = f"{edit_url}?{_query_string(slot_day.year, slot_day.month, slot_day.day)}"
+            history_items.append(
+                {
+                    "date_label": _format_compact_day(slot_day) if slot_day is not None else "",
+                    "slot_time": appointment.slot_time,
+                    "service_label": appointment.service.name,
+                    "status_label": appointment.get_status_display(),
+                    "status_key": appointment.status,
+                    "edit_url": edit_url,
+                }
+            )
+
+        context.update(
+            {
+                "client_obj": client,
+                "client_history": history_items,
+                "back_url": next_url or fallback_url,
+            }
+        )
+        return context
 
 
 class UIValidationView(TemplateView):

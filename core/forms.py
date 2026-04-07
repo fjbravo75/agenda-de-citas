@@ -45,7 +45,7 @@ class AppointmentForm(forms.Form):
         widget=forms.Textarea(attrs={"rows": 4}),
     )
 
-    def __init__(self, *args, instance=None, initial_day=None, **kwargs):
+    def __init__(self, *args, instance=None, initial_day=None, initial_slot_time=None, **kwargs):
         self.instance = instance or Appointment()
         super().__init__(*args, **kwargs)
         self.fields["client"].queryset = Client.objects.order_by("name", "id")
@@ -70,6 +70,9 @@ class AppointmentForm(forms.Form):
         elif initial_day is not None:
             self.initial.setdefault("day", initial_day)
             self.initial.setdefault("status", Appointment.Status.PENDING)
+
+        if self._slot_is_bookable(initial_slot_time):
+            self.initial.setdefault("slot_time", initial_slot_time)
 
         first_bookable_slot = self._first_bookable_slot(target_day)
         if first_bookable_slot is not None:
@@ -153,6 +156,12 @@ class AppointmentForm(forms.Form):
         else:
             suffix = "Disponible"
         return f"{slot_time} · {suffix}"
+
+    def _slot_is_bookable(self, slot_time):
+        if not slot_time:
+            return False
+        valid_values = {str(value) for value, _ in self.fields["slot_time"].choices}
+        return slot_time in valid_values and slot_time not in self.fields["slot_time"].widget.disabled_values
 
     def _assign_instance_values(self, cleaned_data):
         client = cleaned_data.get("client")

@@ -44,6 +44,22 @@ class AgendaBaseTestCase(TestCase):
         appointment.save()
         return appointment
 
+    def _create_existing_cancelled_appointment(
+        self,
+        client,
+        service,
+        target_day,
+        start_time,
+        *,
+        initial_status=Appointment.Status.CONFIRMED,
+        internal_notes="",
+    ):
+        appointment = self._create_appointment(client, service, target_day, start_time, initial_status)
+        appointment.status = Appointment.Status.CANCELLED
+        appointment.internal_notes = internal_notes
+        appointment.save()
+        return appointment
+
     def _create_weekly_availability(self, target_day, slot_times, capacity=3):
         for slot_time in slot_times:
             WeeklyAvailability.objects.create(
@@ -80,6 +96,24 @@ class AppointmentSlotValidationTests(AgendaBaseTestCase):
         appointment.save()
 
         self.assertEqual(Appointment.objects.count(), 1)
+
+    def test_new_appointment_cannot_be_created_directly_as_cancelled(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("11:00",), capacity=2)
+
+        appointment = self._build_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.CANCELLED,
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            appointment.save()
+
+        self.assertIn("no puede crearse ya cancelada", str(raised.exception))
+        self.assertEqual(Appointment.objects.count(), 0)
 
     def test_long_service_duration_does_not_block_next_slot_when_capacity_exists(self):
         today = timezone.localdate()
@@ -540,6 +574,36 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             r'class="[^"]*appointment-slot-row--selected[^"]*"[^>]*data-slot-value="10:00"[^>]*aria-pressed="true"',
         )
 
+    def test_create_view_does_not_offer_cancelled_status(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=2)
+
+        response = self.client.get(
+            reverse("core:appointment_create"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [value for value, _label in response.context["form"].fields["status"].choices],
+            [Appointment.Status.PENDING, Appointment.Status.CONFIRMED],
+        )
+        self.assertNotContains(response, 'value="cancelled"')
+
+    def test_create_view_rejects_manipulated_cancelled_status(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("11:00",), capacity=2)
+
+        response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(status=Appointment.Status.CANCELLED),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Appointment.objects.count(), 0)
+        self.assertIn("status", response.context["form"].errors)
+        self.assertContains(response, "cancelled is not one of the available choices")
+
     def test_create_view_renders_non_bookable_slots_as_inert_and_keeps_bound_selection_on_invalid_post(self):
         today = timezone.localdate()
         self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=1)
@@ -897,12 +961,11 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
     def test_update_view_shows_cancellation_notice_when_appointment_is_cancelled(self):
         today = timezone.localdate()
         self._create_weekly_availability(today, ("09:00",), capacity=1)
-        appointment = self._create_appointment(
+        appointment = self._create_existing_cancelled_appointment(
             self.primary_client,
             self.review_service,
             today,
             time(9, 0),
-            Appointment.Status.CANCELLED,
         )
 
         response = self.client.get(reverse("core:appointment_update", args=[appointment.pk]))
@@ -966,6 +1029,42 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(replacement_response.status_code, 302)
         self.assertEqual(Appointment.active_slot_appointments_count(today, "09:00"), 1)
         self.assertEqual(Appointment.objects.filter(status=Appointment.Status.CANCELLED).count(), 1)
+
+    def test_update_view_keeps_cancelled_appointment_in_client_history(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00",), capacity=1)
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        cancel_response = self.client.post(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            self._appointment_form_data(
+                client=appointment.client_id,
+                service=appointment.service_id,
+                day=today.isoformat(),
+                slot_time="09:00",
+                status=Appointment.Status.CANCELLED,
+                internal_notes="Cancelada y mantenida en historial",
+                delete_mode="false",
+            ),
+        )
+
+        self.assertEqual(cancel_response.status_code, 302)
+
+        history_response = self.client.get(
+            reverse("core:client_detail", args=[appointment.client_id]),
+            {"next": reverse("core:app_entrypoint")},
+        )
+
+        self.assertEqual(history_response.status_code, 200)
+        self.assertContains(history_response, "Cancelada")
+        self.assertContains(history_response, self.review_service.name)
+        self.assertContains(history_response, reverse("core:appointment_update", args=[appointment.pk]))
 
     def test_update_view_requires_explicit_delete_confirmation_and_then_removes_appointment(self):
         today = timezone.localdate()
@@ -1075,12 +1174,12 @@ class ClientDetailViewTests(AuthenticatedAgendaBaseTestCase):
             time(9, 0),
             Appointment.Status.PENDING,
         )
-        oldest_appointment = self._create_appointment(
+        oldest_appointment = self._create_existing_cancelled_appointment(
             self.primary_client,
             self.review_service,
             previous_day,
             time(10, 0),
-            Appointment.Status.CANCELLED,
+            initial_status=Appointment.Status.PENDING,
         )
 
         response = self.client.get(self._client_detail_url(self.primary_client))
@@ -1175,12 +1274,11 @@ class AppEntryPointViewTests(AuthenticatedAgendaBaseTestCase):
             time(12, 0),
             Appointment.Status.CONFIRMED,
         )
-        self._create_appointment(
+        self._create_existing_cancelled_appointment(
             self.tertiary_client,
             self.review_service,
             today,
             time(17, 0),
-            Appointment.Status.CANCELLED,
         )
 
         response = self.client.get(
@@ -1279,12 +1377,11 @@ class AppEntryPointViewTests(AuthenticatedAgendaBaseTestCase):
             time(10, 0),
             Appointment.Status.PENDING,
         )
-        self._create_appointment(
+        self._create_existing_cancelled_appointment(
             self.tertiary_client,
             self.review_service,
             selected_day,
-            time(12, 0),
-            Appointment.Status.CANCELLED,
+            time(10, 0),
         )
 
         response = self.client.get(

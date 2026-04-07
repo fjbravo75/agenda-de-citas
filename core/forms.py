@@ -50,6 +50,7 @@ class AppointmentForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.fields["client"].queryset = Client.objects.order_by("name", "id")
         self.fields["service"].queryset = Service.objects.order_by("name", "id")
+        self._configure_status_field()
         target_day = self._resolve_target_day(initial_day)
         self._configure_slot_field(target_day)
 
@@ -132,6 +133,17 @@ class AppointmentForm(forms.Form):
         self.fields["slot_time"].widget.choices = slot_choices
         self.fields["slot_time"].widget.disabled_values = disabled_values
 
+    def _configure_status_field(self):
+        if self.instance.pk:
+            status_choices = Appointment.Status.choices
+        else:
+            status_choices = [
+                choice
+                for choice in Appointment.Status.choices
+                if choice[0] != Appointment.Status.CANCELLED
+            ]
+        self.fields["status"].choices = status_choices
+
     def _first_bookable_slot(self, target_day):
         slot_states = agenda_slot_booking_state(
             target_day,
@@ -189,7 +201,12 @@ class AppointmentForm(forms.Form):
     def _apply_model_errors(self, error):
         if hasattr(error, "error_dict"):
             for field_name, messages in error.message_dict.items():
-                target_field = "slot_time" if field_name == "start_at" else None
+                if field_name == "start_at":
+                    target_field = "slot_time"
+                elif field_name == "status":
+                    target_field = "status"
+                else:
+                    target_field = None
                 for message in messages:
                     self.add_error(target_field, message)
             return

@@ -149,6 +149,8 @@ class Appointment(models.Model):
             errors["start_at"] = "La cita debe asignarse a uno de los tramos fijos de la agenda."
 
         if self.status == self.Status.CANCELLED:
+            if self._state.adding:
+                errors["status"] = "Una cita nueva no puede crearse ya cancelada."
             if errors:
                 raise ValidationError(errors)
             return

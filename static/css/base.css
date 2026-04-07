@@ -1256,8 +1256,27 @@ h3 {
     border-top: 1px solid rgba(227, 232, 239, 0.58);
 }
 
+.appointment-slot-row--button {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+
 .appointment-slot-row:first-child {
     border-top: none;
+}
+
+.appointment-slot-row--button:hover {
+    background: rgba(49, 88, 215, 0.04);
+}
+
+.appointment-slot-row--button:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px rgba(49, 88, 215, 0.28);
 }
 
 .appointment-slot-row--inactive {
@@ -1266,6 +1285,17 @@ h3 {
 
 .appointment-slot-row--complete {
     opacity: 1;
+}
+
+.appointment-slot-row--selected {
+    margin-inline: -8px;
+    padding-inline: 8px;
+    border-radius: 8px;
+    background: rgba(49, 88, 215, 0.08);
+}
+
+.appointment-slot-row--selected .appointment-slot-row__time {
+    color: var(--color-accent-strong);
 }
 
 .appointment-slot-row__time {
@@ -1381,6 +1411,24 @@ h3 {
     font-size: 10px;
     line-height: 1.2;
     color: var(--color-text-muted);
+}
+
+.appointment-create-panel__slot-field {
+    display: grid;
+    gap: 6px;
+}
+
+.js .appointment-create-panel__slot-select-shell {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
 }
 
 .appointment-create-panel .error-text {

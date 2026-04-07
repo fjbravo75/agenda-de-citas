@@ -252,6 +252,7 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         self.assertContains(response, "Elige un día y prepara la cita.")
         self.assertContains(response, "Tramos del día")
         self.assertContains(response, 'class="appointment-create-panel__form-fields"')
+        self.assertContains(response, 'data-slot-picker')
         self.assertContains(response, 'type="hidden" name="day"')
         self.assertNotContains(response, "Formulario")
         self.assertNotContains(response, 'class="eyebrow agenda-header__eyebrow">Agenda operativa')
@@ -260,6 +261,65 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         self.assertNotContains(response, "hx-get=")
         self.assertFalse(response.context["calendar_hx_enabled"])
         self.assertEqual(response.context["calendar_base_url"], reverse("core:appointment_create"))
+
+    def test_create_view_marks_current_slot_as_selected_in_visual_list(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=2)
+
+        response = self.client.get(
+            reverse("core:appointment_create"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["form"]["slot_time"].value(), "09:00")
+        self.assertRegex(
+            response.content.decode(),
+            r'class="[^"]*appointment-slot-row--selected[^"]*"[^>]*data-slot-value="09:00"[^>]*aria-pressed="true"',
+        )
+
+    def test_create_view_renders_non_bookable_slots_as_inert_and_keeps_bound_selection_on_invalid_post(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=1)
+        self._create_block(today, "10:00", label="Bloqueo interno")
+        self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        get_response = self.client.get(
+            reverse("core:appointment_create"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        get_content = get_response.content.decode()
+        self.assertRegex(
+            get_content,
+            r'class="[^"]*appointment-slot-row--inactive[^"]*"[^>]*data-slot-value="10:00"[^>]*aria-disabled="true"',
+        )
+        self.assertRegex(
+            get_content,
+            r'class="[^"]*appointment-slot-row--inactive[^"]*appointment-slot-row--complete[^"]*"[^>]*data-slot-value="11:00"[^>]*aria-disabled="true"',
+        )
+        self.assertNotRegex(get_content, r'data-slot-button[^>]*data-slot-value="10:00"')
+        self.assertNotRegex(get_content, r'data-slot-button[^>]*data-slot-value="11:00"')
+
+        invalid_response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(client=self.secondary_client.pk),
+        )
+
+        invalid_content = invalid_response.content.decode()
+        self.assertEqual(invalid_response.status_code, 200)
+        self.assertEqual(invalid_response.context["form"]["slot_time"].value(), "11:00")
+        self.assertContains(invalid_response, "capacidad maxima")
+        self.assertRegex(
+            invalid_content,
+            r'class="[^"]*appointment-slot-row--inactive[^"]*appointment-slot-row--complete[^"]*appointment-slot-row--selected[^"]*"[^>]*data-slot-value="11:00"[^>]*aria-disabled="true"',
+        )
 
     def test_create_view_rejects_blocked_slot(self):
         today = timezone.localdate()
@@ -386,7 +446,10 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         slot_11 = self._slot_context(full_response, "11:00")
 
         self.assertEqual(slot_11["complete_label"], "Completo")
-        self.assertContains(full_response, 'class="appointment-slot-row appointment-slot-row--complete"')
+        self.assertRegex(
+            full_response.content.decode(),
+            r'class="[^"]*appointment-slot-row--inactive[^"]*appointment-slot-row--complete[^"]*"[^>]*data-slot-value="11:00"[^>]*aria-disabled="true"',
+        )
         self.assertContains(full_response, "11:00 · Completo")
         self.assertContains(full_response, 'value="11:00" disabled')
         self.assertContains(full_response, 'class="field__feedback field__feedback--slot"')

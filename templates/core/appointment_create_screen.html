@@ -29,63 +29,105 @@
                 </div>
 
                 <div class="appointment-create-panel__body">
-                    <section class="appointment-create-panel__block">
-                        <div class="appointment-create-panel__block-header">
-                            <h3>Tramos del día</h3>
-                        </div>
+                    <form method="post" class="section-stack appointment-create-panel__form">
+                        {% csrf_token %}
+                        {{ form.day.as_hidden }}
 
-                        <div class="appointment-slot-list" aria-label="Reserva visual para tramos del día seleccionado">
-                            {% for slot in agenda_timeline_slots %}
-                            <article class="appointment-slot-row{% if slot.complete_label %} appointment-slot-row--complete{% elif not slot.can_book %} appointment-slot-row--inactive{% endif %}"{% if not slot.can_book %} aria-disabled="true"{% endif %}>
-                                <div class="appointment-slot-row__time">{{ slot.time }}</div>
-                                <div class="appointment-slot-row__meta">
-                                    {% if slot.complete_label %}
-                                    <span class="agenda-slot__state agenda-slot__state--complete">{{ slot.complete_label }}</span>
-                                    {% elif slot.blocked_label %}
-                                    <span class="agenda-slot__state agenda-slot__state--blocked">{{ slot.blocked_label }}</span>
-                                    {% elif slot.busy_label %}
-                                    <span class="appointment-slot-row__state appointment-slot-row__state--busy">
-                                        {{ slot.busy_label }}
-                                    </span>
-                                    {% elif slot.available_label %}
-                                    <span class="agenda-slot__state agenda-slot__state--available">{{ slot.available_label }}</span>
+                        <section class="appointment-create-panel__block">
+                            <div class="appointment-create-panel__block-header">
+                                <h3>Tramos del día</h3>
+                            </div>
+
+                            <div
+                                class="appointment-create-panel__slot-picker"
+                                data-slot-picker
+                            >
+                                <div
+                                    class="appointment-slot-list"
+                                    aria-label="Reserva visual para tramos del día seleccionado"
+                                    role="list"
+                                >
+                                    {% for slot in agenda_timeline_slots %}
+                                    {% if slot.can_book %}
+                                    <button
+                                        type="button"
+                                        class="appointment-slot-row appointment-slot-row--button{% if slot.time == form.slot_time.value %} appointment-slot-row--selected{% endif %}"
+                                        data-slot-option
+                                        data-slot-button
+                                        data-slot-value="{{ slot.time }}"
+                                        aria-pressed="{% if slot.time == form.slot_time.value %}true{% else %}false{% endif %}"
+                                    >
                                     {% else %}
-                                    <span class="agenda-slot__state agenda-slot__state--unavailable">{{ slot.unavailable_label }}</span>
+                                    <div
+                                        class="appointment-slot-row appointment-slot-row--inactive{% if slot.complete_label %} appointment-slot-row--complete{% endif %}{% if slot.time == form.slot_time.value %} appointment-slot-row--selected{% endif %}"
+                                        data-slot-option
+                                        data-slot-value="{{ slot.time }}"
+                                        {% if not slot.can_book %} aria-disabled="true"{% endif %}
+                                    >
                                     {% endif %}
+                                        <div class="appointment-slot-row__time">{{ slot.time }}</div>
+                                        <div class="appointment-slot-row__meta">
+                                            {% if slot.complete_label %}
+                                            <span class="agenda-slot__state agenda-slot__state--complete">{{ slot.complete_label }}</span>
+                                            {% elif slot.blocked_label %}
+                                            <span class="agenda-slot__state agenda-slot__state--blocked">{{ slot.blocked_label }}</span>
+                                            {% elif slot.busy_label %}
+                                            <span class="appointment-slot-row__state appointment-slot-row__state--busy">
+                                                {{ slot.busy_label }}
+                                            </span>
+                                            {% elif slot.available_label %}
+                                            <span class="agenda-slot__state agenda-slot__state--available">{{ slot.available_label }}</span>
+                                            {% else %}
+                                            <span class="agenda-slot__state agenda-slot__state--unavailable">{{ slot.unavailable_label }}</span>
+                                            {% endif %}
+                                        </div>
+                                    {% if slot.can_book %}
+                                    </button>
+                                    {% else %}
+                                    </div>
+                                    {% endif %}
+                                    {% endfor %}
                                 </div>
-                            </article>
-                            {% endfor %}
-                        </div>
-                    </section>
 
-                    <section class="appointment-create-panel__block appointment-create-panel__block--form">
-                        {% if form.non_field_errors %}
-                        <div class="alert alert--danger">
-                            {% for error in form.non_field_errors %}
-                            <p>{{ error }}</p>
-                            {% endfor %}
-                        </div>
-                        {% endif %}
+                                <div class="appointment-create-panel__slot-field">
+                                    <div class="field appointment-create-panel__slot-select-shell">
+                                        {{ form.slot_time.label_tag }}
+                                        {{ form.slot_time }}
+                                    </div>
+                                    <div class="field__feedback field__feedback--slot" aria-live="polite">
+                                        {% if form.slot_time.errors %}
+                                        {% for error in form.slot_time.errors %}
+                                        <p class="error-text">{{ error }}</p>
+                                        {% endfor %}
+                                        {% elif form.slot_time.help_text %}
+                                        <p class="help-text appointment-create-panel__slot-help">{{ form.slot_time.help_text }}</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
 
-                        <form method="post" class="section-stack appointment-create-panel__form">
-                            {% csrf_token %}
-                            {{ form.day.as_hidden }}
+                        <section class="appointment-create-panel__block appointment-create-panel__block--form">
+                            {% if form.non_field_errors %}
+                            <div class="alert alert--danger">
+                                {% for error in form.non_field_errors %}
+                                <p>{{ error }}</p>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+
                             <div class="appointment-create-panel__form-fields">
                                 <div class="form-grid">
                                     {% for field in form %}
-                                    {% if field.name != "day" %}
-                                    <div class="field{% if field.name == 'internal_notes' %} field--full{% endif %}{% if field.name == 'slot_time' %} field--slot{% endif %}{% if field.name == 'status' %} field--status{% endif %}">
+                                    {% if field.name != "day" and field.name != "slot_time" %}
+                                    <div class="field{% if field.name == 'internal_notes' %} field--full{% endif %}{% if field.name == 'status' %} field--status{% endif %}">
                                         {{ field.label_tag }}
                                         {{ field }}
-                                        {% if field.name == "slot_time" or field.errors %}
-                                        <div class="field__feedback{% if field.name == 'slot_time' %} field__feedback--slot{% endif %}"{% if field.name == "slot_time" %} aria-live="polite"{% endif %}>
-                                            {% if field.errors %}
+                                        {% if field.errors %}
+                                        <div class="field__feedback">
                                             {% for error in field.errors %}
                                             <p class="error-text">{{ error }}</p>
                                             {% endfor %}
-                                            {% elif field.name == "slot_time" and field.help_text %}
-                                            <p class="help-text appointment-create-panel__slot-help">{{ field.help_text }}</p>
-                                            {% endif %}
                                         </div>
                                         {% endif %}
                                     </div>
@@ -98,8 +140,8 @@
                                 <button class="button button--primary" type="submit">{{ submit_label }}</button>
                                 <a class="button button--secondary" href="{{ back_url }}">Cancelar</a>
                             </div>
-                        </form>
-                    </section>
+                        </section>
+                    </form>
                 </div>
             </aside>
         </div>

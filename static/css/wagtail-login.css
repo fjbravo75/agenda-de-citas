@@ -1,0 +1,176 @@
+body.login.agenda-login {
+    background:
+        radial-gradient(circle at top left, rgba(49, 88, 215, 0.12), transparent 32%),
+        radial-gradient(circle at bottom right, rgba(46, 122, 88, 0.08), transparent 26%),
+        linear-gradient(160deg, #f6f8fc 0%, #fbfcfe 54%, #f4f8f6 100%);
+}
+
+body.login.agenda-login .wrapper {
+    display: flex;
+    min-height: 100vh;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+}
+
+body.login.agenda-login .content-wrapper {
+    width: min(100%, 440px);
+    padding: 34px 32px 28px;
+    border: 1px solid rgba(216, 224, 234, 0.72);
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.74);
+    box-shadow: 0 18px 48px rgba(21, 32, 51, 0.08);
+    backdrop-filter: blur(10px);
+}
+
+body.login.agenda-login .login-shell__intro {
+    margin-bottom: 18px;
+    text-align: left;
+}
+
+body.login.agenda-login .login-shell__eyebrow {
+    margin: 0 0 10px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #3158d7;
+}
+
+body.login.agenda-login h1 {
+    margin: 0;
+    font-size: 34px;
+    line-height: 1.08;
+    color: #152033;
+}
+
+body.login.agenda-login .login-shell__summary {
+    margin: 10px 0 0;
+    font-size: 15px;
+    line-height: 1.55;
+    color: #5b677b;
+}
+
+body.login.agenda-login .messages {
+    margin-bottom: 16px;
+}
+
+body.login.agenda-login .login-form {
+    border: 1px solid #d8e0ea;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 12px 32px rgba(21, 32, 51, 0.08);
+    padding: 28px;
+}
+
+body.login.agenda-login .field label {
+    color: #152033;
+}
+
+body.login.agenda-login input[type="text"],
+body.login.agenda-login input[type="password"],
+body.login.agenda-login input[type="email"] {
+    border-radius: 10px;
+    border-color: #d8e0ea;
+    box-shadow: none;
+    background: #fcfdff;
+}
+
+body.login.agenda-login input[type="text"]:focus,
+body.login.agenda-login input[type="password"]:focus,
+body.login.agenda-login input[type="email"]:focus {
+    border-color: #3158d7;
+    box-shadow: 0 0 0 4px rgba(49, 88, 215, 0.12);
+}
+
+body.login.agenda-login .reset-password,
+body.login.agenda-login .remember-me,
+body.login.agenda-login .help,
+body.login.agenda-login .help-block,
+body.login.agenda-login .messages li {
+    color: #5b677b;
+}
+
+body.login.agenda-login .messages ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+body.login.agenda-login .messages li {
+    padding: 10px 12px;
+    border: 1px solid #e3e8ef;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.9);
+}
+
+body.login.agenda-login .button-longrunning {
+    border-radius: 10px;
+    border-color: #3158d7;
+    background: #3158d7;
+    width: 100%;
+    justify-content: center;
+}
+
+body.login.agenda-login .button-longrunning:hover,
+body.login.agenda-login .button-longrunning:focus {
+    border-color: #2445ae;
+    background: #2445ae;
+}
+
+body.login.agenda-login .login-brand {
+    display: grid;
+    justify-items: start;
+    gap: 10px;
+    margin-top: 22px;
+    text-align: left;
+}
+
+body.login.agenda-login .login-brand__mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 999px;
+    background: #3158d7;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+body.login.agenda-login .login-brand__meta {
+    display: grid;
+    gap: 2px;
+}
+
+body.login.agenda-login .login-brand__meta strong {
+    color: #152033;
+    font-size: 15px;
+}
+
+body.login.agenda-login .login-brand__meta span {
+    color: #7c8798;
+    font-size: 12px;
+}
+
+@media (max-width: 600px) {
+    body.login.agenda-login .wrapper {
+        padding: 24px 16px;
+    }
+
+    body.login.agenda-login .content-wrapper {
+        padding: 24px 20px 22px;
+        border-radius: 20px;
+    }
+
+    body.login.agenda-login h1 {
+        font-size: 28px;
+    }
+
+    body.login.agenda-login .login-form {
+        padding: 22px;
+    }
+}

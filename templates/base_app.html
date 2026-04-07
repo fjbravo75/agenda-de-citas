@@ -14,12 +14,23 @@
                 <span class="brand__subtle">Agenda operativa interna</span>
             </span>
         </a>
-        <nav class="nav-cluster" aria-label="Navegacion interna">
-            <a class="nav-link{% if request.path == '/app/' %} is-active{% endif %}" href="/app/">Agenda</a>
-            <a class="nav-link{% if request.path == '/app/ui/' %} is-active{% endif %}" href="/app/ui/">UI</a>
-            <a class="nav-link{% if request.path == '/app/calendar-ui/' %} is-active{% endif %}" href="/app/calendar-ui/">Mock</a>
-            <a class="nav-link" href="/">CMS</a>
-        </nav>
+        <div class="header-row__secondary">
+            <nav class="nav-cluster" aria-label="Navegacion interna">
+                <a class="nav-link{% if request.path == '/app/' %} is-active{% endif %}" href="/app/">Agenda</a>
+                <a class="nav-link{% if request.path == '/app/ui/' %} is-active{% endif %}" href="/app/ui/">UI</a>
+                <a class="nav-link{% if request.path == '/app/calendar-ui/' %} is-active{% endif %}" href="/app/calendar-ui/">Mock</a>
+                <a class="nav-link" href="/">CMS</a>
+            </nav>
+            {% if request.user.is_authenticated %}
+            <div class="session-chip" aria-label="Sesion actual">
+                <strong class="session-chip__user">{{ request.user.get_full_name|default:request.user.get_username }}</strong>
+                <form method="post" action="{% url 'core:app_logout' %}" class="session-chip__logout-form">
+                    {% csrf_token %}
+                    <button class="button button--ghost session-chip__logout" type="submit">Cerrar sesion</button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
     </div>
 </header>
 

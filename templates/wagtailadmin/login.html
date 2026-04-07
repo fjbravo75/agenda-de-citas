@@ -1,0 +1,90 @@
+{% extends "wagtailadmin/admin_base.html" %}
+{% load i18n wagtailadmin_tags static %}
+
+{% block titletag %}Acceso - Agenda de Citas{% endblock %}
+{% block branding_title %}Agenda de Citas{% endblock %}
+{% block bodyclass %}login agenda-login{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'css/wagtail-login.css' %}">
+{% endblock %}
+
+{% block furniture %}
+    <main class="content-wrapper" id="main">
+        <div class="login-shell__intro">
+            <p class="login-shell__eyebrow">Agenda de Citas</p>
+            <h1>{% block branding_login %}Accede a la agenda{% endblock %}</h1>
+            <p class="login-shell__summary">Usa tu cuenta interna para continuar en la zona protegida.</p>
+        </div>
+
+        <div class="messages" role="status">
+            {% if messages or form.errors %}
+                <ul>
+                    {% if form.errors %}
+                        {% for error in form.non_field_errors %}
+                            <li class="error">{{ error }}</li>
+                        {% endfor %}
+                    {% endif %}
+                    {% for message in messages %}
+                        <li class="{{ message.tags }}">{{ message }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </div>
+
+        {% block above_login %}{% endblock %}
+
+        <form class="login-form" action="{% url 'wagtailadmin_login' %}" method="post" autocomplete="off" novalidate>
+            {% block login_form %}
+                {% csrf_token %}
+
+                {% url 'wagtailadmin_home' as home_url %}
+                <input type="hidden" name="next" value="{{ next|default:home_url }}" />
+
+                {% block fields %}
+                    {% formattedfield form.username %}
+                    {% formattedfield form.password %}
+
+                    {% if show_password_reset %}
+                        <a class="reset-password" href="{% url 'wagtailadmin_password_reset' %}">{% trans "Forgotten password?" %}</a>
+                    {% endif %}
+
+                    {% block extra_fields %}
+                        {% for field_name, field in form.extra_fields %}
+                            {% formattedfield field %}
+                        {% endfor %}
+                    {% endblock extra_fields %}
+
+                    {% include "wagtailadmin/shared/forms/single_checkbox.html" with label_classname="remember-me" name="remember" text=_("Remember me") %}
+                {% endblock %}
+            {% endblock %}
+            <footer class="form-actions">
+                {% block submit_buttons %}
+                    <button
+                        type="submit"
+                        class="button button-longrunning"
+                        data-controller="w-progress"
+                        data-action="w-progress#activate"
+                        data-w-progress-active-value="Entrando..."
+                    >
+                        {% icon name="spinner" %}
+                        <em data-w-progress-target="label">Entrar</em>
+                    </button>
+                {% endblock %}
+            </footer>
+        </form>
+
+        {% block below_login %}{% endblock %}
+
+        {% block branding_logo %}
+            <div class="login-brand">
+                <span class="login-brand__mark">AC</span>
+                <div class="login-brand__meta">
+                    <strong>Agenda de Citas</strong>
+                    <span>Acceso interno</span>
+                </div>
+            </div>
+        {% endblock %}
+    </main>
+{% endblock %}

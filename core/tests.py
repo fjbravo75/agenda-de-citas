@@ -1,6 +1,7 @@
 from datetime import datetime, time, timedelta
 from urllib.parse import urlencode
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
@@ -11,12 +12,19 @@ from .models import Appointment, AvailabilityBlock, Client, Service, WeeklyAvail
 
 class AgendaBaseTestCase(TestCase):
     def setUp(self):
+        super().setUp()
         self.review_service = Service.objects.create(name="Revision", duration_minutes=45, color="#3158D7")
         self.control_service = Service.objects.create(name="Control", duration_minutes=30, color="#2E7A58")
         self.primary_client = Client.objects.create(name="Claudia Real")
         self.secondary_client = Client.objects.create(name="Mario Real")
         self.tertiary_client = Client.objects.create(name="Nora Real")
         self.fourth_client = Client.objects.create(name="Lia Real")
+        self.app_user = get_user_model().objects.create_user(
+            username="agenda-operator",
+            password="agenda-pass-123",
+            is_staff=True,
+            is_superuser=True,
+        )
 
     def _build_appointment(self, client, service, target_day, start_time, status):
         start_at = timezone.make_aware(
@@ -46,6 +54,15 @@ class AgendaBaseTestCase(TestCase):
 
     def _create_block(self, target_day, slot_time, label="Bloqueo puntual"):
         return AvailabilityBlock.objects.create(day=target_day, slot_time=slot_time, label=label)
+
+    def login_app_user(self):
+        self.client.force_login(self.app_user)
+
+
+class AuthenticatedAgendaBaseTestCase(AgendaBaseTestCase):
+    def setUp(self):
+        super().setUp()
+        self.login_app_user()
 
 
 class AppointmentSlotValidationTests(AgendaBaseTestCase):
@@ -226,7 +243,165 @@ class AppointmentSlotValidationTests(AgendaBaseTestCase):
         self.assertIn("capacidad maxima", str(raised.exception))
 
 
-class AppointmentFlowViewTests(AgendaBaseTestCase):
+class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
+    def _assert_redirects_to_login(self, response, next_url):
+        expected_url = f"{reverse('wagtailadmin_login')}?{urlencode({'next': next_url})}"
+        self.assertRedirects(response, expected_url, fetch_redirect_response=False)
+
+    def test_app_entrypoint_redirects_anonymous_user_to_wagtail_login(self):
+        today = timezone.localdate()
+        query = urlencode({"year": today.year, "month": today.month, "day": today.day})
+        requested_url = f"{reverse('core:app_entrypoint')}?{query}"
+
+        response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_appointment_create_redirects_anonymous_user_to_wagtail_login(self):
+        today = timezone.localdate()
+        query = urlencode({"year": today.year, "month": today.month, "day": today.day})
+        requested_url = f"{reverse('core:appointment_create')}?{query}"
+
+        response = self.client.get(
+            reverse("core:appointment_create"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_appointment_update_redirects_anonymous_user_to_wagtail_login(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00",), capacity=1)
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        query = urlencode({"year": today.year, "month": today.month, "day": today.day})
+        requested_url = f"{reverse('core:appointment_update', args=[appointment.pk])}?{query}"
+
+        response = self.client.get(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_client_detail_redirects_anonymous_user_to_wagtail_login(self):
+        requested_url = reverse("core:client_detail", args=[self.primary_client.pk])
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_ui_preview_redirects_anonymous_user_to_wagtail_login(self):
+        requested_url = reverse("core:ui_preview")
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_calendar_ui_preview_redirects_anonymous_user_to_wagtail_login(self):
+        requested_url = reverse("core:calendar_ui_preview")
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_ui_preview_returns_200_for_authenticated_user(self):
+        self.login_app_user()
+
+        response = self.client.get(reverse("core:ui_preview"))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_calendar_ui_preview_returns_200_for_authenticated_user(self):
+        self.login_app_user()
+
+        response = self.client.get(reverse("core:calendar_ui_preview"))
+
+        self.assertEqual(response.status_code, 200)
+
+
+class SessionAccessAndLoginBrandingTests(AgendaBaseTestCase):
+    def test_login_page_uses_custom_branding_and_preserves_next(self):
+        app_url = reverse("core:app_entrypoint")
+
+        response = self.client.get(reverse("wagtailadmin_login"), {"next": app_url})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "wagtailadmin/login.html")
+        self.assertContains(response, "Agenda de Citas")
+        self.assertContains(response, "Accede a la agenda")
+        self.assertContains(response, "Acceso - Agenda de Citas")
+        self.assertContains(response, 'value="/app/"')
+        self.assertContains(response, "Entrar")
+
+    def test_login_page_post_redirects_to_app_when_next_is_provided(self):
+        response = self.client.post(
+            reverse("wagtailadmin_login"),
+            {
+                "username": self.app_user.username,
+                "password": "agenda-pass-123",
+                "next": reverse("core:app_entrypoint"),
+            },
+        )
+
+        self.assertRedirects(response, reverse("core:app_entrypoint"))
+        self.assertIn("_auth_user_id", self.client.session)
+
+    def test_authenticated_app_shell_shows_current_user_and_logout_action(self):
+        self.login_app_user()
+
+        response = self.client.get(reverse("core:app_entrypoint"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.app_user.username)
+        self.assertContains(response, reverse("core:app_logout"))
+        self.assertContains(response, "Cerrar sesion")
+
+    def test_app_logout_redirects_to_app_oriented_login_and_closes_session(self):
+        self.login_app_user()
+
+        response = self.client.post(reverse("core:app_logout"))
+
+        expected_login_url = f"{reverse('wagtailadmin_login')}?{urlencode({'next': reverse('core:app_entrypoint')})}"
+        self.assertRedirects(response, expected_login_url, fetch_redirect_response=False)
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+        app_response = self.client.get(reverse("core:app_entrypoint"))
+        self.assertRedirects(app_response, expected_login_url, fetch_redirect_response=False)
+
+    def test_login_after_app_logout_returns_user_to_app_instead_of_admin(self):
+        self.login_app_user()
+
+        logout_response = self.client.post(reverse("core:app_logout"))
+        expected_login_url = f"{reverse('wagtailadmin_login')}?{urlencode({'next': reverse('core:app_entrypoint')})}"
+
+        self.assertRedirects(logout_response, expected_login_url, fetch_redirect_response=False)
+
+        login_page = self.client.get(logout_response.headers["Location"])
+        self.assertEqual(login_page.status_code, 200)
+        self.assertContains(login_page, 'value="/app/"')
+
+        login_response = self.client.post(
+            reverse("wagtailadmin_login"),
+            {
+                "username": self.app_user.username,
+                "password": "agenda-pass-123",
+                "next": reverse("core:app_entrypoint"),
+            },
+        )
+
+        self.assertRedirects(login_response, reverse("core:app_entrypoint"))
+
+
+class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
     def _slot_context(self, response, slot_time):
         for slot in response.context["agenda_timeline_slots"]:
             if slot["time"] == slot_time:
@@ -854,7 +1029,7 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         self.assertEqual(Appointment.objects.filter(status=Appointment.Status.CANCELLED).count(), 0)
 
 
-class ClientDetailViewTests(AgendaBaseTestCase):
+class ClientDetailViewTests(AuthenticatedAgendaBaseTestCase):
     def _client_detail_url(self, client, next_url=None):
         base_url = reverse("core:client_detail", args=[client.pk])
         if not next_url:
@@ -961,7 +1136,7 @@ class ClientDetailViewTests(AgendaBaseTestCase):
         self.assertContains(response, f'href="{reverse("core:app_entrypoint")}"')
 
 
-class AppEntryPointViewTests(AgendaBaseTestCase):
+class AppEntryPointViewTests(AuthenticatedAgendaBaseTestCase):
     def _day_context(self, response, target_day):
         for week in response.context["agenda_weeks"]:
             for week_day in week:

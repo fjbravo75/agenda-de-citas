@@ -144,9 +144,25 @@ h3 {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 20px;
-    min-height: 64px;
-    padding-block: 12px;
+    gap: 16px;
+    min-height: 56px;
+    padding-block: 8px;
+}
+
+.header-row__secondary {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+    flex-wrap: nowrap;
+}
+
+.header-row__secondary .nav-cluster {
+    flex-wrap: nowrap;
+    min-width: 0;
+    gap: 6px;
 }
 
 .brand {
@@ -173,18 +189,18 @@ h3 {
 
 .brand__meta {
     display: grid;
-    gap: 2px;
+    gap: 0;
 }
 
 .brand__name {
     font-size: 15px;
     font-weight: 650;
-    line-height: 1.25;
+    line-height: 1.15;
 }
 
 .brand__subtle {
-    font-size: 12px;
-    line-height: 1.45;
+    font-size: 11px;
+    line-height: 1.25;
     color: var(--color-text-soft);
 }
 
@@ -213,8 +229,8 @@ h3 {
 }
 
 .nav-link {
-    min-height: 30px;
-    padding: 0 12px;
+    min-height: 28px;
+    padding: 0 10px;
     border-radius: 6px;
     font-size: 14px;
     color: var(--color-text-muted);
@@ -225,6 +241,50 @@ h3 {
     color: var(--color-text);
     border-color: var(--color-line);
     background: var(--color-surface-soft);
+}
+
+.session-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.session-chip__user {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+}
+
+.session-chip__logout-form {
+    margin: 0;
+    padding-left: 10px;
+    border-left: 1px solid var(--color-line);
+}
+
+.session-chip__logout.button {
+    min-height: auto;
+    height: auto;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    border-radius: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+}
+
+.session-chip__logout.button:hover {
+    color: var(--color-text);
+    border-color: transparent;
+    background: transparent;
 }
 
 .chip,
@@ -1989,6 +2049,19 @@ h3 {
     .free-slot,
     .action-item {
         flex-direction: column;
+    }
+
+    .header-row__secondary,
+    .session-chip {
+        width: 100%;
+    }
+
+    .header-row__secondary {
+        justify-content: flex-start;
+    }
+
+    .session-chip {
+        justify-content: space-between;
     }
 
     .hero-metric {

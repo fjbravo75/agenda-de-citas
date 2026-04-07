@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AppEntryPointView,
+    AppLogoutView,
     ClientDetailView,
     AppointmentCreateView,
     AppointmentUpdateView,
@@ -14,6 +15,7 @@ app_name = "core"
 
 urlpatterns = [
     path("", AppEntryPointView.as_view(), name="app_entrypoint"),
+    path("logout/", AppLogoutView.as_view(), name="app_logout"),
     path("appointments/new/", AppointmentCreateView.as_view(), name="appointment_create"),
     path("appointments/<int:pk>/edit/", AppointmentUpdateView.as_view(), name="appointment_update"),
     path("clients/<int:pk>/", ClientDetailView.as_view(), name="client_detail"),

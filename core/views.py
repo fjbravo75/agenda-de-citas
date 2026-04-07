@@ -2,14 +2,16 @@ from calendar import Calendar, monthrange
 from datetime import date, datetime, time, timedelta
 from urllib.parse import urlencode
 
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
-from django.urls import reverse
+from django.urls import reverse, reverse_lazy
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from django.views.generic import FormView, TemplateView
+from wagtail.admin.views.account import LogoutView as WagtailLogoutView
 
 from .forms import AppointmentForm
 from .models import (
@@ -118,6 +120,10 @@ def _build_calendar_context(
 
 def _agenda_url_for_day(target_day):
     return f"{reverse('core:app_entrypoint')}?{_query_string(target_day.year, target_day.month, target_day.day)}"
+
+
+def _app_oriented_login_url():
+    return f"{reverse('wagtailadmin_login')}?{urlencode({'next': reverse('core:app_entrypoint')})}"
 
 
 def _format_count_label(count, singular, plural):
@@ -486,7 +492,17 @@ def _resolve_calendar_state(request):
     return year, month, selected_day, real_today
 
 
-class AppEntryPointView(TemplateView):
+class AppLoginRequiredMixin(LoginRequiredMixin):
+    login_url = reverse_lazy("wagtailadmin_login")
+
+
+class AppLogoutView(WagtailLogoutView):
+    @property
+    def next_page(self):
+        return _app_oriented_login_url()
+
+
+class AppEntryPointView(AppLoginRequiredMixin, TemplateView):
     template_name = "core/app_entrypoint.html"
 
     def get_context_data(self, **kwargs):
@@ -517,7 +533,7 @@ class AppEntryPointView(TemplateView):
         return context
 
 
-class AppointmentFormViewBase(FormView):
+class AppointmentFormViewBase(AppLoginRequiredMixin, FormView):
     template_name = "core/appointment_form.html"
     form_class = AppointmentForm
 
@@ -685,7 +701,7 @@ class AppointmentUpdateView(AppointmentFormViewBase):
         return self.request.POST.get("delete_mode") == "true"
 
 
-class ClientDetailView(TemplateView):
+class ClientDetailView(AppLoginRequiredMixin, TemplateView):
     template_name = "core/client_detail.html"
 
     def get_client(self):
@@ -727,9 +743,9 @@ class ClientDetailView(TemplateView):
         return context
 
 
-class UIValidationView(TemplateView):
+class UIValidationView(AppLoginRequiredMixin, TemplateView):
     template_name = "core/ui_preview.html"
 
 
-class CalendarUIValidationView(TemplateView):
+class CalendarUIValidationView(AppLoginRequiredMixin, TemplateView):
     template_name = "core/calendar_ui_preview.html"

@@ -548,6 +548,11 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         self.assertFalse(response.context["calendar_interactive"])
         self.assertEqual(response.context["form"]["day"].value(), today)
         self.assertEqual(response.context["form"]["slot_time"].value(), "09:00")
+        self.assertContains(response, "Eliminar cita")
+        self.assertContains(response, 'data-delete-mode-input')
+        self.assertContains(response, 'data-delete-trigger')
+        self.assertContains(response, 'data-cancel-notice')
+        self.assertContains(response, 'data-delete-confirmation')
 
     def test_update_view_keeps_contextual_calendar_tied_to_appointment_day_on_get(self):
         today = timezone.localdate()
@@ -630,6 +635,140 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         self.assertEqual(appointment.status, Appointment.Status.PENDING)
         self.assertEqual(appointment.internal_notes, "Cambio valido")
 
+    def test_update_view_shows_cancellation_notice_when_appointment_is_cancelled(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00",), capacity=1)
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CANCELLED,
+        )
+
+        response = self.client.get(reverse("core:appointment_update", args=[appointment.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "volvera a quedar libre")
+        self.assertContains(response, "La cancelacion seguira registrada en la base de datos.")
+        self.assertContains(response, 'data-cancel-notice')
+        self.assertContains(response, 'data-delete-confirmation')
+        self.assertRegex(response.content.decode(), r'data-delete-confirmation[^>]*hidden')
+
+    def test_update_view_can_cancel_appointment_without_deleting_and_free_slot_for_new_booking(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00",), capacity=1)
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        cancel_response = self.client.post(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            self._appointment_form_data(
+                client=appointment.client_id,
+                service=appointment.service_id,
+                day=today.isoformat(),
+                slot_time="09:00",
+                status=Appointment.Status.CANCELLED,
+                internal_notes="Cancelada sin borrar",
+                delete_mode="false",
+            ),
+        )
+
+        self.assertEqual(cancel_response.status_code, 302)
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.Status.CANCELLED)
+        self.assertEqual(Appointment.objects.filter(pk=appointment.pk).count(), 1)
+        self.assertEqual(Appointment.active_slot_appointments_count(today, "09:00"), 0)
+
+        agenda_response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+        slot_09 = self._slot_context(agenda_response, "09:00")
+
+        self.assertEqual(agenda_response.status_code, 200)
+        self.assertEqual(slot_09["available_label"], "Disponible")
+        self.assertEqual(slot_09["entries"], [])
+        self.assertNotContains(agenda_response, self.primary_client.name)
+
+        replacement_response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(
+                client=self.secondary_client.pk,
+                slot_time="09:00",
+            ),
+        )
+
+        self.assertEqual(replacement_response.status_code, 302)
+        self.assertEqual(Appointment.active_slot_appointments_count(today, "09:00"), 1)
+        self.assertEqual(Appointment.objects.filter(status=Appointment.Status.CANCELLED).count(), 1)
+
+    def test_update_view_requires_explicit_delete_confirmation_and_then_removes_appointment(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00",), capacity=1)
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        confirmation_response = self.client.post(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            self._appointment_form_data(
+                client=appointment.client_id,
+                service=appointment.service_id,
+                day=today.isoformat(),
+                slot_time="09:00",
+                status=appointment.status,
+                internal_notes="Preparando borrado",
+                delete_mode="false",
+                edit_intent="show_delete_confirmation",
+            ),
+        )
+
+        self.assertEqual(confirmation_response.status_code, 200)
+        self.assertContains(confirmation_response, "Confirmar eliminacion")
+        self.assertContains(confirmation_response, "desaparecera tambien del historial")
+        self.assertRegex(confirmation_response.content.decode(), r'data-delete-confirmation\s*>')
+        self.assertRegex(confirmation_response.content.decode(), r'data-cancel-notice[^>]*hidden')
+        self.assertEqual(Appointment.objects.filter(pk=appointment.pk).count(), 1)
+
+        delete_response = self.client.post(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            self._appointment_form_data(
+                client=appointment.client_id,
+                service=appointment.service_id,
+                day=today.isoformat(),
+                slot_time="09:00",
+                status=appointment.status,
+                internal_notes="Borrado confirmado",
+                delete_mode="true",
+                edit_intent="confirm_delete",
+            ),
+        )
+
+        self.assertEqual(delete_response.status_code, 302)
+        self.assertFalse(Appointment.objects.filter(pk=appointment.pk).exists())
+        self.assertEqual(Appointment.active_slot_appointments_count(today, "09:00"), 0)
+
+        replacement_response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(
+                client=self.secondary_client.pk,
+                slot_time="09:00",
+            ),
+        )
+
+        self.assertEqual(replacement_response.status_code, 302)
+        self.assertEqual(Appointment.objects.filter(status=Appointment.Status.CANCELLED).count(), 0)
+
 
 class AppEntryPointViewTests(AgendaBaseTestCase):
     def _day_context(self, response, target_day):
@@ -689,19 +828,20 @@ class AppEntryPointViewTests(AgendaBaseTestCase):
         self.assertContains(response, "Bloqueo interno")
         self.assertContains(response, "Disponible")
         self.assertContains(response, "Fuera de disponibilidad")
+        self.assertNotContains(response, "Nora Real")
         self.assertContains(response, reverse("core:appointment_create"))
         self.assertContains(response, reverse("core:appointment_update", args=[first_appointment.pk]))
         self.assertContains(response, "pendientes y confirmadas del día")
         self.assertContains(response, "tramos ocupados del día")
-        self.assertContains(response, "siguen visibles en el panel")
+        self.assertContains(response, "sin ocupar tramo activo")
         self.assertNotContains(response, response.context["selected_day_summary"])
         self.assertNotContains(response, "pending + confirmed del dia")
 
         metrics = {metric["label"]: metric["value"] for metric in response.context["agenda_metrics"]}
         self.assertEqual(metrics["Citas activas"], "03")
-        self.assertEqual(metrics["Tramos con citas"], "04")
+        self.assertEqual(metrics["Tramos con citas"], "03")
         self.assertEqual(metrics["Confirmadas"], "02")
-        self.assertEqual(metrics["Canceladas"], "01")
+        self.assertEqual(metrics["Canceladas"], "00")
 
     def test_daily_panel_entries_are_clickable_and_do_not_render_edit_link_copy(self):
         today = timezone.localdate()

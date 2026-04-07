@@ -29,8 +29,9 @@
                 </div>
 
                 <div class="appointment-edit-panel__body">
-                    <form method="post" class="section-stack appointment-create-panel__form">
+                    <form method="post" class="section-stack appointment-create-panel__form" data-appointment-edit-form>
                         {% csrf_token %}
+                        <input type="hidden" name="delete_mode" value="{% if delete_mode %}true{% else %}false{% endif %}" data-delete-mode-input>
 
                         <section class="appointment-create-panel__block appointment-create-panel__block--form appointment-edit-panel__block">
                             <div class="section-stack appointment-edit-panel__intro">
@@ -49,7 +50,37 @@
                             <div class="appointment-create-panel__form-fields">
                                 <div class="form-grid">
                                     {% for field in form %}
-                                    <div class="field{% if field.name == 'internal_notes' %} field--full{% endif %}{% if field.name == 'status' %} field--status{% endif %}">
+                                    {% if field.name == "status" %}
+                                    <div class="appointment-edit-panel__status-row field--full">
+                                        <div class="field field--status appointment-edit-panel__status-field">
+                                            {{ field.label_tag }}
+                                            <div class="appointment-edit-panel__status-controls">
+                                                {{ field }}
+                                                <div class="appointment-edit-panel__status-action">
+                                                    <button
+                                                        class="button button--ghost appointment-edit-panel__delete-trigger"
+                                                        type="submit"
+                                                        name="edit_intent"
+                                                        value="show_delete_confirmation"
+                                                        data-delete-trigger
+                                                        aria-expanded="{% if delete_mode %}true{% else %}false{% endif %}"
+                                                        {% if delete_mode %}hidden{% endif %}
+                                                    >
+                                                        Eliminar cita
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            {% if field.errors %}
+                                            <div class="field__feedback">
+                                                {% for error in field.errors %}
+                                                <p class="error-text">{{ error }}</p>
+                                                {% endfor %}
+                                            </div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    {% else %}
+                                    <div class="field{% if field.name == 'internal_notes' %} field--full{% endif %}">
                                         {{ field.label_tag }}
                                         {{ field }}
                                         {% if field.errors %}
@@ -60,12 +91,55 @@
                                         </div>
                                         {% endif %}
                                     </div>
+                                    {% endif %}
                                     {% endfor %}
                                 </div>
                             </div>
 
+                            <div class="appointment-edit-panel__decision-zone">
+                                <div
+                                    class="alert alert--danger appointment-edit-panel__decision-block appointment-edit-panel__decision-block--cancel"
+                                    data-cancel-notice
+                                    {% if delete_mode or form.status.value != "cancelled" %}hidden{% endif %}
+                                >
+                                    <p>
+                                        Si guardas esta cita como cancelada, el tramo volvera a quedar libre y desaparecera de la agenda operativa mensual y diaria. La cancelacion seguira registrada en la base de datos.
+                                    </p>
+                                </div>
+
+                                <div
+                                    class="alert alert--danger appointment-edit-panel__decision-block appointment-edit-panel__decision-block--delete"
+                                    data-delete-confirmation
+                                    {% if not delete_mode %}hidden{% endif %}
+                                >
+                                    <div class="appointment-edit-panel__decision-copy">
+                                        <p>Esta accion borrara la cita de forma permanente.</p>
+                                        <p>Si confirmas, desaparecera tambien del historial y el tramo quedara libre para nuevas citas.</p>
+                                    </div>
+                                    <div class="page-actions appointment-edit-panel__decision-actions">
+                                        <button
+                                            class="button button--danger"
+                                            type="submit"
+                                            name="edit_intent"
+                                            value="confirm_delete"
+                                        >
+                                            Confirmar eliminacion
+                                        </button>
+                                        <button
+                                            class="button button--secondary"
+                                            type="submit"
+                                            name="edit_intent"
+                                            value="dismiss_delete_confirmation"
+                                            data-delete-dismiss
+                                        >
+                                            Seguir editando
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div class="page-actions">
-                                <button class="button button--primary" type="submit">{{ submit_label }}</button>
+                                <button class="button button--primary" type="submit" data-save-changes>{{ submit_label }}</button>
                                 <a class="button button--secondary" href="{{ back_url }}">Cancelar</a>
                             </div>
                         </section>

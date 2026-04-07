@@ -32,6 +32,10 @@
     box-sizing: border-box;
 }
 
+[hidden] {
+    display: none !important;
+}
+
 html {
     scroll-behavior: smooth;
 }
@@ -1252,6 +1256,69 @@ h3 {
     line-height: 1.3;
 }
 
+.appointment-edit-panel__status-row {
+    min-width: 0;
+}
+
+.appointment-edit-panel__status-field {
+    min-width: 0;
+}
+
+.appointment-edit-panel__status-field.field--status::after {
+    display: none;
+}
+
+.appointment-edit-panel__status-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    align-items: center;
+}
+
+.appointment-edit-panel__status-action {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-width: 0;
+}
+
+.appointment-edit-panel__delete-trigger {
+    width: 100%;
+    color: var(--color-danger);
+    border-color: #e7d9d6;
+    background: #ffffff;
+}
+
+.appointment-edit-panel__delete-trigger:hover,
+.appointment-edit-panel__delete-trigger:focus-visible {
+    color: #8f3f38;
+    border-color: #dcbfba;
+    background: #fcf5f4;
+}
+
+.appointment-edit-panel__decision-zone {
+    display: grid;
+    gap: 10px;
+    min-height: 0;
+    align-content: start;
+}
+
+.appointment-edit-panel__decision-block {
+    display: grid;
+    gap: 10px;
+}
+
+.appointment-edit-panel__decision-copy {
+    display: grid;
+    gap: 4px;
+}
+
+.appointment-edit-panel__decision-actions {
+    gap: 6px;
+    padding-top: 0;
+    margin-top: 0;
+}
+
 .appointment-create-panel__block-header {
     display: flex;
     align-items: center;
@@ -1952,6 +2019,14 @@ h3 {
     .appointment-create-panel__form-fields,
     .appointment-edit-panel__body {
         overflow: visible;
+    }
+
+    .appointment-edit-panel__status-controls {
+        grid-template-columns: 1fr;
+    }
+
+    .appointment-edit-panel__status-action {
+        justify-content: flex-start;
     }
 }
 

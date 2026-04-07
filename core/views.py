@@ -179,7 +179,11 @@ def _appointments_for_day(target_day):
     start_at, end_at = _day_bounds(target_day)
     return list(
         Appointment.objects.select_related("client", "service")
-        .filter(start_at__gte=start_at, start_at__lt=end_at)
+        .filter(
+            start_at__gte=start_at,
+            start_at__lt=end_at,
+            status__in=Appointment.active_statuses(),
+        )
         .order_by("start_at", "id")
     )
 
@@ -311,7 +315,7 @@ def _build_agenda_metrics(timeline_slots):
         {
             "label": "Canceladas",
             "value": f"{cancelled_entries:02d}",
-            "meta": "siguen visibles en el panel",
+            "meta": "sin ocupar tramo activo",
         },
     ]
 
@@ -556,6 +560,10 @@ class AppointmentCreateView(AppointmentFormViewBase):
 
 
 class AppointmentUpdateView(AppointmentFormViewBase):
+    SHOW_DELETE_CONFIRMATION_INTENT = "show_delete_confirmation"
+    DISMISS_DELETE_CONFIRMATION_INTENT = "dismiss_delete_confirmation"
+    CONFIRM_DELETE_INTENT = "confirm_delete"
+
     def get_appointment(self):
         if not hasattr(self, "_appointment"):
             self._appointment = get_object_or_404(Appointment, pk=self.kwargs["pk"])
@@ -593,9 +601,32 @@ class AppointmentUpdateView(AppointmentFormViewBase):
         context.update(
             {
                 "selected_day_title": _format_day_title(selected_day),
+                "delete_mode": kwargs.pop("delete_mode", self._delete_mode_requested()),
             }
         )
         return context
+
+    def post(self, request, *args, **kwargs):
+        intent = request.POST.get("edit_intent", "")
+
+        if intent == self.CONFIRM_DELETE_INTENT and self._delete_mode_requested():
+            appointment = self.get_appointment()
+            redirect_day = appointment.slot_day
+            appointment.delete()
+            return HttpResponseRedirect(_agenda_url_for_day(redirect_day))
+
+        if intent in {
+            self.SHOW_DELETE_CONFIRMATION_INTENT,
+            self.DISMISS_DELETE_CONFIRMATION_INTENT,
+        }:
+            form = self.get_form()
+            delete_mode = intent == self.SHOW_DELETE_CONFIRMATION_INTENT
+            return self.render_to_response(self.get_context_data(form=form, delete_mode=delete_mode))
+
+        return super().post(request, *args, **kwargs)
+
+    def _delete_mode_requested(self):
+        return self.request.POST.get("delete_mode") == "true"
 
 
 class UIValidationView(TemplateView):

@@ -55,8 +55,83 @@ const initAppointmentSlotPickers = () => {
     });
 };
 
+const syncAppointmentEditDangerState = (form) => {
+    const statusSelect = form.querySelector('select[name="status"]');
+    const deleteModeInput = form.querySelector("[data-delete-mode-input]");
+    const deleteTrigger = form.querySelector("[data-delete-trigger]");
+    const cancelNotice = form.querySelector("[data-cancel-notice]");
+    const deleteConfirmation = form.querySelector("[data-delete-confirmation]");
+    const isDeleteMode = deleteModeInput?.value === "true";
+    const isCancelled = statusSelect?.value === "cancelled";
+
+    if (deleteTrigger) {
+        deleteTrigger.hidden = isDeleteMode;
+        deleteTrigger.setAttribute("aria-expanded", isDeleteMode ? "true" : "false");
+    }
+
+    if (cancelNotice) {
+        cancelNotice.hidden = isDeleteMode || !isCancelled;
+    }
+
+    if (deleteConfirmation) {
+        deleteConfirmation.hidden = !isDeleteMode;
+    }
+};
+
+const initAppointmentEditForms = () => {
+    document.querySelectorAll("[data-appointment-edit-form]").forEach((form) => {
+        if (form.dataset.editDangerReady === "true") {
+            return;
+        }
+
+        const statusSelect = form.querySelector('select[name="status"]');
+        const deleteModeInput = form.querySelector("[data-delete-mode-input]");
+        const deleteTrigger = form.querySelector("[data-delete-trigger]");
+        const dismissTriggers = form.querySelectorAll("[data-delete-dismiss]");
+        const saveChangesButton = form.querySelector("[data-save-changes]");
+
+        const setDeleteMode = (isDeleteMode) => {
+            if (!deleteModeInput) {
+                return;
+            }
+
+            deleteModeInput.value = isDeleteMode ? "true" : "false";
+            syncAppointmentEditDangerState(form);
+        };
+
+        if (deleteTrigger) {
+            deleteTrigger.addEventListener("click", (event) => {
+                event.preventDefault();
+                setDeleteMode(true);
+            });
+        }
+
+        dismissTriggers.forEach((trigger) => {
+            trigger.addEventListener("click", (event) => {
+                event.preventDefault();
+                setDeleteMode(false);
+            });
+        });
+
+        if (statusSelect) {
+            statusSelect.addEventListener("change", () => syncAppointmentEditDangerState(form));
+        }
+
+        if (saveChangesButton) {
+            saveChangesButton.addEventListener("click", () => setDeleteMode(false));
+        }
+
+        syncAppointmentEditDangerState(form);
+        form.dataset.editDangerReady = "true";
+    });
+};
+
 if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initAppointmentSlotPickers);
+    document.addEventListener("DOMContentLoaded", () => {
+        initAppointmentSlotPickers();
+        initAppointmentEditForms();
+    });
 } else {
     initAppointmentSlotPickers();
+    initAppointmentEditForms();
 }

@@ -1358,7 +1358,7 @@ h3 {
 .appointment-create-panel .field--status::after {
     content: "";
     display: block;
-    min-height: 24px;
+    min-height: 10px;
 }
 
 .appointment-create-panel .field label {
@@ -1381,9 +1381,9 @@ h3 {
 }
 
 .appointment-create-panel .field textarea {
-    height: 72px;
-    min-height: 72px;
-    max-height: 72px;
+    height: 64px;
+    min-height: 64px;
+    max-height: 64px;
     padding: 7px 9px;
     font-size: 13px;
     overflow-y: auto;

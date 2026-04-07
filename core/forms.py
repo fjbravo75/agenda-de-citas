@@ -125,7 +125,7 @@ class AppointmentForm(forms.Form):
                 disabled_values.add(slot_time)
 
         self.fields["slot_time"].choices = slot_choices
-        self.fields["slot_time"].help_text = "Solo se pueden elegir tramos con capacidad libre."
+        self.fields["slot_time"].help_text = "Solo se pueden elegir tramos con plaza libre dentro de su capacidad."
         self.fields["slot_time"].widget.choices = slot_choices
         self.fields["slot_time"].widget.disabled_values = disabled_values
 

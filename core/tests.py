@@ -64,6 +64,35 @@ class AppointmentSlotValidationTests(AgendaBaseTestCase):
 
         self.assertEqual(Appointment.objects.count(), 1)
 
+    def test_long_service_duration_does_not_block_next_slot_when_capacity_exists(self):
+        today = timezone.localdate()
+        self.review_service.duration_minutes = 120
+        self.review_service.save(update_fields=["duration_minutes"])
+        self._create_weekly_availability(today, ("09:00", "10:00"), capacity=1)
+
+        first_appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        second_appointment = self._build_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(10, 0),
+            Appointment.Status.PENDING,
+        )
+
+        second_appointment.save()
+        first_appointment.refresh_from_db()
+
+        self.assertGreater(first_appointment.end_at, second_appointment.start_at)
+        self.assertEqual(Appointment.objects.count(), 2)
+        self.assertEqual(Appointment.active_slot_appointments_count(today, "09:00"), 1)
+        self.assertEqual(Appointment.active_slot_appointments_count(today, "10:00"), 1)
+
     def test_appointment_in_blocked_slot_is_rejected(self):
         today = timezone.localdate()
         self._create_weekly_availability(today, ("11:00",), capacity=2)
@@ -228,6 +257,34 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         appointment = Appointment.objects.get()
         self.assertEqual(appointment.slot_day, today)
         self.assertEqual(appointment.slot_time, "11:00")
+
+    def test_create_view_keeps_slot_based_validation_even_when_another_service_runs_long(self):
+        today = timezone.localdate()
+        self.review_service.duration_minutes = 120
+        self.review_service.save(update_fields=["duration_minutes"])
+        self._create_weekly_availability(today, ("09:00", "10:00"), capacity=1)
+        first_appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(
+                client=self.secondary_client.pk,
+                service=self.control_service.pk,
+                slot_time="10:00",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Appointment.objects.count(), 2)
+        created_appointment = Appointment.objects.exclude(pk=first_appointment.pk).get()
+        self.assertEqual(created_appointment.slot_time, "10:00")
+        self.assertGreater(first_appointment.end_at, created_appointment.start_at)
 
     def test_create_view_uses_agenda_layout_structure_for_new_screen(self):
         today = timezone.localdate()
@@ -455,7 +512,7 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         self.assertContains(full_response, "11:00 · Completo")
         self.assertContains(full_response, 'value="11:00" disabled')
         self.assertContains(full_response, 'class="field__feedback field__feedback--slot"')
-        self.assertContains(full_response, "Solo se pueden elegir tramos con capacidad libre.")
+        self.assertContains(full_response, "Solo se pueden elegir tramos con plaza libre dentro de su capacidad.")
 
     def test_update_view_uses_same_shell_with_contextual_calendar_and_native_date_and_slot_fields(self):
         today = timezone.localdate()

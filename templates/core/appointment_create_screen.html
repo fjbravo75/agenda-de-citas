@@ -118,22 +118,74 @@
                             {% endif %}
 
                             <div class="appointment-create-panel__form-fields">
-                                <div class="form-grid">
-                                    {% for field in form %}
-                                    {% if field.name != "day" and field.name != "slot_time" %}
-                                    <div class="field{% if field.name == 'internal_notes' %} field--full{% endif %}{% if field.name == 'status' %} field--status{% endif %}">
-                                        {{ field.label_tag }}
-                                        {{ field }}
-                                        {% if field.errors %}
+                                <div class="appointment-create-panel__control-stack">
+                                    <div class="appointment-create-panel__primary-grid">
+                                        <div class="appointment-create-panel__grid-cell appointment-create-panel__grid-cell--field">
+                                            <div class="field appointment-create-panel__grid-field">
+                                                {{ form.client.label_tag }}
+                                                {{ form.client }}
+                                                {% if form.client.errors %}
+                                                <div class="field__feedback">
+                                                    {% for error in form.client.errors %}
+                                                    <p class="error-text">{{ error }}</p>
+                                                    {% endfor %}
+                                                </div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+
+                                        <div class="appointment-create-panel__grid-cell appointment-create-panel__grid-cell--action">
+                                            <div class="appointment-create-panel__grid-action-body">
+                                                <a
+                                                    class="button button--secondary appointment-create-panel__grid-action-button"
+                                                    href="{{ client_create_url }}"
+                                                    data-client-create-link
+                                                >
+                                                    Crear cliente nuevo
+                                                </a>
+                                            </div>
+                                        </div>
+
+                                        <div class="appointment-create-panel__grid-cell appointment-create-panel__grid-cell--field">
+                                            <div class="field appointment-create-panel__grid-field">
+                                                {{ form.service.label_tag }}
+                                                {{ form.service }}
+                                                {% if form.service.errors %}
+                                                <div class="field__feedback">
+                                                    {% for error in form.service.errors %}
+                                                    <p class="error-text">{{ error }}</p>
+                                                    {% endfor %}
+                                                </div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+
+                                        <div class="appointment-create-panel__grid-cell appointment-create-panel__grid-cell--field">
+                                            <div class="field appointment-create-panel__grid-field field--status">
+                                                {{ form.status.label_tag }}
+                                                {{ form.status }}
+                                                {% if form.status.errors %}
+                                                <div class="field__feedback">
+                                                    {% for error in form.status.errors %}
+                                                    <p class="error-text">{{ error }}</p>
+                                                    {% endfor %}
+                                                </div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="field field--full appointment-create-panel__notes-field">
+                                        {{ form.internal_notes.label_tag }}
+                                        {{ form.internal_notes }}
+                                        {% if form.internal_notes.errors %}
                                         <div class="field__feedback">
-                                            {% for error in field.errors %}
+                                            {% for error in form.internal_notes.errors %}
                                             <p class="error-text">{{ error }}</p>
                                             {% endfor %}
                                         </div>
                                         {% endif %}
                                     </div>
-                                    {% endif %}
-                                    {% endfor %}
                                 </div>
                             </div>
 

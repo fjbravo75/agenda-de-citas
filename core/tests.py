@@ -306,6 +306,34 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
 
         self._assert_redirects_to_login(response, requested_url)
 
+    def test_client_create_redirects_anonymous_user_to_wagtail_login(self):
+        today = timezone.localdate()
+        agenda_query = urlencode({"year": today.year, "month": today.month, "day": today.day})
+        appointment_next = f"{reverse('core:app_entrypoint')}?{agenda_query}"
+        query = urlencode(
+            {
+                "year": today.year,
+                "month": today.month,
+                "day": today.day,
+                "slot_time": "10:00",
+                "appointment_next": appointment_next,
+            }
+        )
+        requested_url = f"{reverse('core:client_create')}?{query}"
+
+        response = self.client.get(
+            reverse("core:client_create"),
+            {
+                "year": today.year,
+                "month": today.month,
+                "day": today.day,
+                "slot_time": "10:00",
+                "appointment_next": appointment_next,
+            },
+        )
+
+        self._assert_redirects_to_login(response, requested_url)
+
     def test_appointment_update_redirects_anonymous_user_to_wagtail_login(self):
         today = timezone.localdate()
         self._create_weekly_availability(today, ("09:00",), capacity=1)
@@ -573,6 +601,102 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             response.content.decode(),
             r'class="[^"]*appointment-slot-row--selected[^"]*"[^>]*data-slot-value="10:00"[^>]*aria-pressed="true"',
         )
+
+    def test_create_view_offers_contextual_access_to_client_create(self):
+        today = timezone.localdate()
+        agenda_query = urlencode({"year": today.year, "month": today.month, "day": today.day})
+        next_url = f"{reverse('core:app_entrypoint')}?{agenda_query}"
+        expected_client_create_url = (
+            f"{reverse('core:client_create')}?"
+            f"{urlencode({'year': today.year, 'month': today.month, 'day': today.day, 'slot_time': '10:00', 'appointment_next': next_url})}"
+        )
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=2)
+
+        response = self.client.get(
+            reverse("core:appointment_create"),
+            {
+                "year": today.year,
+                "month": today.month,
+                "day": today.day,
+                "slot_time": "10:00",
+                "next": next_url,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["client_create_url"], expected_client_create_url)
+        self.assertContains(response, "Crear cliente nuevo")
+        self.assertContains(response, 'data-client-create-link')
+        self.assertContains(response, expected_client_create_url.replace("&", "&amp;"))
+
+    def test_client_create_view_returns_200_and_keeps_contextual_back_url(self):
+        today = timezone.localdate()
+        agenda_query = urlencode({"year": today.year, "month": today.month, "day": today.day})
+        appointment_next = f"{reverse('core:app_entrypoint')}?{agenda_query}"
+        expected_back_url = (
+            f"{reverse('core:appointment_create')}?"
+            f"{urlencode({'year': today.year, 'month': today.month, 'day': today.day, 'slot_time': '10:00', 'next': appointment_next})}"
+        )
+
+        response = self.client.get(
+            reverse("core:client_create"),
+            {
+                "year": today.year,
+                "month": today.month,
+                "day": today.day,
+                "slot_time": "10:00",
+                "appointment_next": appointment_next,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/client_form.html")
+        self.assertEqual(response.context["back_url"], expected_back_url)
+        self.assertIn("10:00", response.context["appointment_context_label"])
+        self.assertIn(str(today.day), response.context["appointment_context_label"])
+        self.assertContains(response, "Nuevo cliente")
+        self.assertContains(response, "Volver a Nueva cita")
+
+    def test_client_create_view_creates_minimal_client_and_returns_to_new_appointment_preselected(self):
+        today = timezone.localdate()
+        agenda_query = urlencode({"year": today.year, "month": today.month, "day": today.day})
+        appointment_next = f"{reverse('core:app_entrypoint')}?{agenda_query}"
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=2)
+
+        response = self.client.post(
+            reverse("core:client_create"),
+            {
+                "name": "Cliente Nuevo",
+                "phone": "",
+                "email": "",
+                "notes": "",
+                "year": today.year,
+                "month": today.month,
+                "day": today.day,
+                "slot_time": "10:00",
+                "appointment_next": appointment_next,
+            },
+        )
+
+        created_client = Client.objects.get(name="Cliente Nuevo")
+        expected_return_url = (
+            f"{reverse('core:appointment_create')}?"
+            f"{urlencode({'year': today.year, 'month': today.month, 'day': today.day, 'slot_time': '10:00', 'next': appointment_next, 'client': created_client.pk})}"
+        )
+
+        self.assertRedirects(response, expected_return_url, fetch_redirect_response=False)
+        self.assertEqual(created_client.phone, "")
+        self.assertEqual(created_client.email, "")
+        self.assertEqual(created_client.notes, "")
+
+        create_response = self.client.get(response.headers["Location"])
+
+        self.assertEqual(create_response.status_code, 200)
+        self.assertEqual(create_response.context["form"]["day"].value(), today)
+        self.assertEqual(create_response.context["form"]["slot_time"].value(), "10:00")
+        self.assertEqual(str(create_response.context["form"]["client"].value()), str(created_client.pk))
+        self.assertEqual(create_response.context["back_url"], appointment_next)
+        self.assertContains(create_response, "Cliente Nuevo")
 
     def test_create_view_does_not_offer_cancelled_status(self):
         today = timezone.localdate()

@@ -13,7 +13,7 @@ from django.utils import timezone
 from django.views.generic import FormView, TemplateView
 from wagtail.admin.views.account import LogoutView as WagtailLogoutView
 
-from .forms import AppointmentForm
+from .forms import AppointmentForm, ClientForm
 from .models import (
     AGENDA_SLOT_TIMES,
     Appointment,
@@ -165,6 +165,17 @@ def _safe_next_url(request):
     return ""
 
 
+def _safe_appointment_next_url(request):
+    raw_next = request.POST.get("appointment_next") or request.GET.get("appointment_next", "")
+    if raw_next and url_has_allowed_host_and_scheme(
+        raw_next,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return raw_next
+    return ""
+
+
 def _url_with_next(base_url, next_url):
     if not next_url:
         return base_url
@@ -172,12 +183,63 @@ def _url_with_next(base_url, next_url):
     return f"{base_url}{separator}{urlencode({'next': next_url})}"
 
 
+def _appointment_create_url(target_day=None, slot_time="", next_url="", client_id=None):
+    query_params = {}
+
+    if target_day is not None:
+        query_params.update(
+            {
+                "year": target_day.year,
+                "month": target_day.month,
+                "day": target_day.day,
+            }
+        )
+
+    if slot_time in AGENDA_SLOT_TIMES:
+        query_params["slot_time"] = slot_time
+
+    if next_url:
+        query_params["next"] = next_url
+
+    if client_id not in (None, ""):
+        query_params["client"] = client_id
+
+    base_url = reverse("core:appointment_create")
+    if not query_params:
+        return base_url
+    return f"{base_url}?{urlencode(query_params)}"
+
+
+def _client_create_url(target_day=None, slot_time="", appointment_next_url=""):
+    query_params = {}
+
+    if target_day is not None:
+        query_params.update(
+            {
+                "year": target_day.year,
+                "month": target_day.month,
+                "day": target_day.day,
+            }
+        )
+
+    if slot_time in AGENDA_SLOT_TIMES:
+        query_params["slot_time"] = slot_time
+
+    if appointment_next_url:
+        query_params["appointment_next"] = appointment_next_url
+
+    base_url = reverse("core:client_create")
+    if not query_params:
+        return base_url
+    return f"{base_url}?{urlencode(query_params)}"
+
+
 def _appointment_create_url_for_slot(target_day, slot_time, next_url=""):
-    base_url = (
-        f"{reverse('core:appointment_create')}?"
-        f"{urlencode({'year': target_day.year, 'month': target_day.month, 'day': target_day.day, 'slot_time': slot_time})}"
+    return _appointment_create_url(
+        target_day=target_day,
+        slot_time=slot_time,
+        next_url=next_url,
     )
-    return _url_with_next(base_url, next_url)
 
 
 def _empty_timeline_slots():
@@ -566,6 +628,7 @@ class AppointmentFormViewBase(AppLoginRequiredMixin, FormView):
         kwargs["instance"] = self.get_appointment()
         kwargs["initial_day"] = self.get_selected_day()
         kwargs["initial_slot_time"] = self.get_initial_slot_time()
+        kwargs["initial_client_id"] = self.get_initial_client_id()
         return kwargs
 
     def get_initial_slot_time(self):
@@ -573,6 +636,10 @@ class AppointmentFormViewBase(AppLoginRequiredMixin, FormView):
         if raw_slot_time in AGENDA_SLOT_TIMES:
             return raw_slot_time
         return None
+
+    def get_initial_client_id(self):
+        raw_client_id = self.request.GET.get("client", "").strip()
+        return raw_client_id or None
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -628,6 +695,12 @@ class AppointmentCreateView(AppointmentFormViewBase):
             )
         )
         context.update(day_panel)
+        current_slot_time = context["form"]["slot_time"].value() or self.get_initial_slot_time() or ""
+        context["client_create_url"] = _client_create_url(
+            target_day=selected_day,
+            slot_time=current_slot_time,
+            appointment_next_url=context["back_url"],
+        )
         return context
 
 
@@ -741,6 +814,73 @@ class ClientDetailView(AppLoginRequiredMixin, TemplateView):
             }
         )
         return context
+
+
+class ClientCreateView(AppLoginRequiredMixin, FormView):
+    template_name = "core/client_form.html"
+    form_class = ClientForm
+
+    def _raw_context_value(self, key):
+        return self.request.POST.get(key) or self.request.GET.get(key, "")
+
+    def get_selected_day(self):
+        raw_year = self._raw_context_value("year")
+        raw_month = self._raw_context_value("month")
+        raw_day = self._raw_context_value("day")
+
+        try:
+            return date(int(raw_year), int(raw_month), int(raw_day))
+        except (TypeError, ValueError):
+            return None
+
+    def get_slot_time(self):
+        raw_slot_time = self._raw_context_value("slot_time")
+        if raw_slot_time in AGENDA_SLOT_TIMES:
+            return raw_slot_time
+        return ""
+
+    def get_appointment_next_url(self):
+        return _safe_appointment_next_url(self.request)
+
+    def get_return_url(self, client_id=None):
+        return _appointment_create_url(
+            target_day=self.get_selected_day(),
+            slot_time=self.get_slot_time(),
+            next_url=self.get_appointment_next_url(),
+            client_id=client_id,
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        selected_day = self.get_selected_day()
+        slot_time = self.get_slot_time()
+        appointment_context_label = ""
+
+        if selected_day is not None:
+            appointment_context_label = _format_day_title(selected_day)
+            if slot_time:
+                appointment_context_label = f"{appointment_context_label} · {slot_time}"
+        elif slot_time:
+            appointment_context_label = f"Tramo {slot_time}"
+
+        context.update(
+            {
+                "page_title": "Nuevo cliente",
+                "page_description": "Da de alta al cliente y vuelve al flujo de Nueva cita.",
+                "back_url": self.get_return_url(),
+                "appointment_context_label": appointment_context_label,
+                "return_year": selected_day.year if selected_day is not None else "",
+                "return_month": selected_day.month if selected_day is not None else "",
+                "return_day": selected_day.day if selected_day is not None else "",
+                "return_slot_time": slot_time,
+                "appointment_next_url": self.get_appointment_next_url(),
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        client = form.save()
+        return HttpResponseRedirect(self.get_return_url(client_id=client.pk))
 
 
 class UIValidationView(AppLoginRequiredMixin, TemplateView):

@@ -1,0 +1,68 @@
+{% extends "base_app.html" %}
+
+{% block title %}{{ page_title }} | Agenda de Citas{% endblock %}
+
+{% block body_class %}theme-root theme-app app-client-screen{% endblock %}
+
+{% block content %}
+<section class="section-stack">
+    <header class="page-header">
+        <div class="page-header__copy">
+            <h1>{{ page_title }}</h1>
+            <p class="text-secondary">{{ page_description }}</p>
+        </div>
+        <div class="page-actions">
+            <a class="button button--secondary" href="{{ back_url }}">Volver a Nueva cita</a>
+        </div>
+    </header>
+</section>
+
+<section class="section-stack">
+    <article class="section-surface">
+        <form method="post" class="section-stack">
+            {% csrf_token %}
+            <input type="hidden" name="year" value="{{ return_year }}">
+            <input type="hidden" name="month" value="{{ return_month }}">
+            <input type="hidden" name="day" value="{{ return_day }}">
+            <input type="hidden" name="slot_time" value="{{ return_slot_time }}">
+            <input type="hidden" name="appointment_next" value="{{ appointment_next_url }}">
+
+            {% if appointment_context_label %}
+            <div class="stack-sm">
+                <p class="eyebrow">Nueva cita en curso</p>
+                <p class="text-secondary">Al guardar, volveras a la cita que estabas preparando para {{ appointment_context_label }}.</p>
+            </div>
+            {% endif %}
+
+            {% if form.non_field_errors %}
+            <div class="alert alert--danger">
+                {% for error in form.non_field_errors %}
+                <p>{{ error }}</p>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div class="form-grid">
+                {% for field in form %}
+                <div class="field{% if field.name == 'notes' %} field--full{% endif %}">
+                    {{ field.label_tag }}
+                    {{ field }}
+                    {% if field.errors %}
+                    <div class="field__feedback">
+                        {% for error in field.errors %}
+                        <p class="error-text">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="page-actions">
+                <button class="button button--primary" type="submit">Guardar cliente</button>
+                <a class="button button--secondary" href="{{ back_url }}">Cancelar</a>
+            </div>
+        </form>
+    </article>
+</section>
+{% endblock %}

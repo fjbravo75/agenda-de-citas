@@ -26,6 +26,21 @@ class SlotChoiceSelect(forms.Select):
         return option
 
 
+class ClientForm(forms.ModelForm):
+    class Meta:
+        model = Client
+        fields = ("name", "phone", "email", "notes")
+        labels = {
+            "name": "Nombre",
+            "phone": "Telefono",
+            "email": "Email",
+            "notes": "Notas",
+        }
+        widgets = {
+            "notes": forms.Textarea(attrs={"rows": 4}),
+        }
+
+
 class AppointmentForm(forms.Form):
     client = forms.ModelChoiceField(queryset=Client.objects.none(), label="Cliente")
     service = forms.ModelChoiceField(queryset=Service.objects.none(), label="Servicio")
@@ -45,7 +60,15 @@ class AppointmentForm(forms.Form):
         widget=forms.Textarea(attrs={"rows": 4}),
     )
 
-    def __init__(self, *args, instance=None, initial_day=None, initial_slot_time=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        instance=None,
+        initial_day=None,
+        initial_slot_time=None,
+        initial_client_id=None,
+        **kwargs,
+    ):
         self.instance = instance or Appointment()
         super().__init__(*args, **kwargs)
         self.fields["client"].queryset = Client.objects.order_by("name", "id")
@@ -71,6 +94,10 @@ class AppointmentForm(forms.Form):
         elif initial_day is not None:
             self.initial.setdefault("day", initial_day)
             self.initial.setdefault("status", Appointment.Status.PENDING)
+
+        initial_client = self._resolve_initial_client(initial_client_id)
+        if initial_client is not None:
+            self.initial.setdefault("client", initial_client.pk)
 
         if self._slot_is_bookable(initial_slot_time):
             self.initial.setdefault("slot_time", initial_slot_time)
@@ -174,6 +201,20 @@ class AppointmentForm(forms.Form):
             return False
         valid_values = {str(value) for value, _ in self.fields["slot_time"].choices}
         return slot_time in valid_values and slot_time not in self.fields["slot_time"].widget.disabled_values
+
+    def _resolve_initial_client(self, initial_client_id):
+        if self.instance.pk or not initial_client_id:
+            return None
+
+        try:
+            normalized_client_id = int(initial_client_id)
+        except (TypeError, ValueError):
+            return None
+
+        try:
+            return self.fields["client"].queryset.get(pk=normalized_client_id)
+        except Client.DoesNotExist:
+            return None
 
     def _assign_instance_values(self, cleaned_data):
         client = cleaned_data.get("client")

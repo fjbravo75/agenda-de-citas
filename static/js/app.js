@@ -13,6 +13,24 @@ const syncSlotPickerState = (picker, select) => {
     });
 };
 
+const syncClientCreateLink = (picker, select) => {
+    const clientCreateLink = picker.closest("form")?.querySelector("[data-client-create-link]");
+    if (!clientCreateLink) {
+        return;
+    }
+
+    const nextValue = select.value;
+    const linkUrl = new URL(clientCreateLink.href, window.location.origin);
+
+    if (nextValue) {
+        linkUrl.searchParams.set("slot_time", nextValue);
+    } else {
+        linkUrl.searchParams.delete("slot_time");
+    }
+
+    clientCreateLink.href = `${linkUrl.pathname}${linkUrl.search}${linkUrl.hash}`;
+};
+
 const initAppointmentSlotPickers = () => {
     document.querySelectorAll("[data-slot-picker]").forEach((picker) => {
         if (picker.dataset.slotPickerReady === "true") {
@@ -30,6 +48,7 @@ const initAppointmentSlotPickers = () => {
 
                 if (!nextValue || select.value === nextValue) {
                     syncSlotPickerState(picker, select);
+                    syncClientCreateLink(picker, select);
                     return;
                 }
 
@@ -39,18 +58,24 @@ const initAppointmentSlotPickers = () => {
 
                 if (!matchingOption) {
                     syncSlotPickerState(picker, select);
+                    syncClientCreateLink(picker, select);
                     return;
                 }
 
                 select.value = nextValue;
                 select.dispatchEvent(new Event("change", { bubbles: true }));
                 syncSlotPickerState(picker, select);
+                syncClientCreateLink(picker, select);
             });
         });
 
-        select.addEventListener("change", () => syncSlotPickerState(picker, select));
+        select.addEventListener("change", () => {
+            syncSlotPickerState(picker, select);
+            syncClientCreateLink(picker, select);
+        });
 
         syncSlotPickerState(picker, select);
+        syncClientCreateLink(picker, select);
         picker.dataset.slotPickerReady = "true";
     });
 };

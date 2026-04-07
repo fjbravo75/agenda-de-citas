@@ -1492,6 +1492,52 @@ h3 {
     padding-right: 0;
 }
 
+.appointment-create-panel__control-stack {
+    display: grid;
+    flex: 1;
+    min-height: 0;
+    gap: 12px;
+    width: 100%;
+    align-content: start;
+}
+
+.appointment-create-panel__primary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+    align-items: start;
+}
+
+.appointment-create-panel__grid-cell,
+.appointment-create-panel__grid-field,
+.appointment-create-panel__notes-field {
+    min-width: 0;
+}
+
+.appointment-create-panel__grid-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+}
+
+.appointment-create-panel__grid-cell--action {
+    padding-top: 16px;
+}
+
+.appointment-create-panel__grid-action-body {
+    display: flex;
+    align-items: center;
+    min-height: 28px;
+}
+
+.appointment-create-panel__grid-action-button {
+    width: 100%;
+    min-height: 28px;
+    justify-content: center;
+    padding: 0 8px;
+    white-space: nowrap;
+}
+
 .appointment-create-panel .form-grid {
     display: grid;
     flex: 1;

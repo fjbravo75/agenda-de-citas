@@ -1,4 +1,5 @@
 from datetime import datetime, time, timedelta
+from urllib.parse import urlencode
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -260,6 +261,7 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         self.assertNotContains(response, "El tramo sigue indicandose desde el formulario.")
         self.assertNotContains(response, "hx-get=")
         self.assertFalse(response.context["calendar_hx_enabled"])
+        self.assertTrue(response.context["calendar_interactive"])
         self.assertEqual(response.context["calendar_base_url"], reverse("core:appointment_create"))
 
     def test_create_view_marks_current_slot_as_selected_in_visual_list(self):
@@ -455,6 +457,66 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         self.assertContains(full_response, 'class="field__feedback field__feedback--slot"')
         self.assertContains(full_response, "Solo se pueden elegir tramos con capacidad libre.")
 
+    def test_update_view_uses_same_shell_with_contextual_calendar_and_native_date_and_slot_fields(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=2)
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        response = self.client.get(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="agenda-layout"')
+        self.assertContains(response, 'class="agenda-month agenda-month--contextual"')
+        self.assertContains(response, 'class="agenda-panel appointment-create-panel appointment-edit-panel"')
+        self.assertContains(response, "Editar cita")
+        self.assertContains(response, "Guardar cambios")
+        self.assertContains(response, 'type="date"')
+        self.assertContains(response, 'name="day"')
+        self.assertContains(response, 'name="slot_time"')
+        self.assertContains(response, 'class="agenda-month__nav-link agenda-month__nav-link--static"')
+        self.assertContains(response, 'class="agenda-day__link agenda-day__link--static"')
+        self.assertNotContains(response, 'type="hidden" name="day"')
+        self.assertNotContains(response, 'data-slot-picker')
+        self.assertNotContains(response, "hx-get=")
+        self.assertFalse(response.context["calendar_hx_enabled"])
+        self.assertFalse(response.context["calendar_interactive"])
+        self.assertEqual(response.context["form"]["day"].value(), today)
+        self.assertEqual(response.context["form"]["slot_time"].value(), "09:00")
+
+    def test_update_view_keeps_contextual_calendar_tied_to_appointment_day_on_get(self):
+        today = timezone.localdate()
+        query_day = today + timedelta(days=1)
+        self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=2)
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        response = self.client.get(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            {"year": query_day.year, "month": query_day.month, "day": query_day.day},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_day_iso"], today.isoformat())
+        self.assertEqual(response.context["form"]["day"].value(), today)
+        self.assertEqual(
+            response.context["back_url"],
+            f"{reverse('core:app_entrypoint')}?{urlencode({'year': today.year, 'month': today.month, 'day': today.day})}",
+        )
+
     def test_update_view_keeps_validation_and_allows_valid_edit(self):
         today = timezone.localdate()
         self._create_weekly_availability(today, ("09:00", "10:00", "11:00"), capacity=1)
@@ -501,6 +563,11 @@ class AppointmentFlowViewTests(AgendaBaseTestCase):
         )
 
         self.assertEqual(valid_response.status_code, 302)
+        self.assertRedirects(
+            valid_response,
+            f"{reverse('core:app_entrypoint')}?{urlencode({'year': today.year, 'month': today.month, 'day': today.day})}",
+            fetch_redirect_response=False,
+        )
         appointment.refresh_from_db()
         self.assertEqual(appointment.slot_time, "11:00")
         self.assertEqual(appointment.status, Appointment.Status.PENDING)

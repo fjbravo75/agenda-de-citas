@@ -89,6 +89,7 @@ def _build_calendar_context(
     month_summary,
     calendar_base_url,
     calendar_hx_enabled,
+    calendar_interactive=True,
     calendar_hx_target_id="",
 ):
     return {
@@ -108,6 +109,7 @@ def _build_calendar_context(
         "today_query": _query_string(real_today.year, real_today.month, real_today.day),
         "calendar_base_url": calendar_base_url,
         "calendar_hx_enabled": calendar_hx_enabled,
+        "calendar_interactive": calendar_interactive,
         "calendar_hx_target_id": calendar_hx_target_id,
     }
 
@@ -558,6 +560,42 @@ class AppointmentUpdateView(AppointmentFormViewBase):
         if not hasattr(self, "_appointment"):
             self._appointment = get_object_or_404(Appointment, pk=self.kwargs["pk"])
         return self._appointment
+
+    def get_selected_day(self):
+        if self.request.method == "POST":
+            raw_day = self.request.POST.get("day")
+            if raw_day:
+                try:
+                    return date.fromisoformat(raw_day)
+                except ValueError:
+                    pass
+        return self.get_appointment().slot_day
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        selected_day = self.get_selected_day()
+        visible_year = selected_day.year
+        visible_month = selected_day.month
+        real_today = _real_today()
+        month_summary = _month_summary(visible_year, visible_month)
+        context.update(
+            _build_calendar_context(
+                visible_year=visible_year,
+                visible_month=visible_month,
+                selected_day=selected_day,
+                real_today=real_today,
+                month_summary=month_summary,
+                calendar_base_url=reverse("core:appointment_update", args=[self.get_appointment().pk]),
+                calendar_hx_enabled=False,
+                calendar_interactive=False,
+            )
+        )
+        context.update(
+            {
+                "selected_day_title": _format_day_title(selected_day),
+            }
+        )
+        return context
 
 
 class UIValidationView(TemplateView):

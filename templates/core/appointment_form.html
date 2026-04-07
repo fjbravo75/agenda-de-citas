@@ -5,13 +5,12 @@
 {% block body_class %}theme-root theme-app app-appointment-screen{% endblock %}
 
 {% block content %}
-<div class="section-stack">
+<div class="agenda-screen appointment-edit-screen">
     <section class="section-stack">
-        <header class="page-header">
+        <header class="page-header agenda-header">
             <div class="page-header__copy">
-                <p class="eyebrow">Agenda operativa</p>
-                <h1>{{ page_title }}</h1>
-                <p class="page-header__text">{{ page_description }}</p>
+                <h1 class="agenda-header__title">{{ page_title }}</h1>
+                <p class="agenda-header__subtitle">Cambia los datos de la cita y guarda cuando lo tengas listo.</p>
             </div>
             <div class="page-actions">
                 <a class="button button--secondary" href="{{ back_url }}">Volver a la agenda</a>
@@ -19,39 +18,61 @@
         </header>
     </section>
 
-    <section class="card section-stack">
-        <div class="section-stack">
-            <p class="text-secondary">
-                La cita solo se puede guardar si el tramo elegido esta disponible, no esta bloqueado y mantiene capacidad libre.
-            </p>
-            {% if form.non_field_errors %}
-            <div class="alert alert--danger">
-                {% for error in form.non_field_errors %}
-                <p>{{ error }}</p>
-                {% endfor %}
-            </div>
-            {% endif %}
-        </div>
+    <section class="section-stack">
+        <div class="agenda-layout">
+            {% include "core/_agenda_month.html" %}
 
-        <form method="post" class="section-stack">
-            {% csrf_token %}
-            <div class="form-grid">
-                {% for field in form %}
-                <div class="field{% if field.name == 'internal_notes' %} field--full{% endif %}">
-                    {{ field.label_tag }}
-                    {{ field }}
-                    {% for error in field.errors %}
-                    <p class="error-text">{{ error }}</p>
-                    {% endfor %}
+            <aside class="agenda-panel appointment-create-panel appointment-edit-panel">
+                <div class="agenda-panel__section">
+                    <p class="eyebrow agenda-panel__eyebrow">{{ page_title }}</p>
+                    <h2 class="agenda-panel__date">{{ selected_day_title }}</h2>
                 </div>
-                {% endfor %}
-            </div>
 
-            <div class="page-actions">
-                <button class="button button--primary" type="submit">{{ submit_label }}</button>
-                <a class="button button--secondary" href="{{ back_url }}">Cancelar</a>
-            </div>
-        </form>
+                <div class="appointment-edit-panel__body">
+                    <form method="post" class="section-stack appointment-create-panel__form">
+                        {% csrf_token %}
+
+                        <section class="appointment-create-panel__block appointment-create-panel__block--form appointment-edit-panel__block">
+                            <div class="section-stack appointment-edit-panel__intro">
+                                <p class="text-secondary">
+                                    Revisa los cambios con calma. Si el horario está disponible, podrás guardar sin problema.
+                                </p>
+                                {% if form.non_field_errors %}
+                                <div class="alert alert--danger">
+                                    {% for error in form.non_field_errors %}
+                                    <p>{{ error }}</p>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                            </div>
+
+                            <div class="appointment-create-panel__form-fields">
+                                <div class="form-grid">
+                                    {% for field in form %}
+                                    <div class="field{% if field.name == 'internal_notes' %} field--full{% endif %}{% if field.name == 'status' %} field--status{% endif %}">
+                                        {{ field.label_tag }}
+                                        {{ field }}
+                                        {% if field.errors %}
+                                        <div class="field__feedback">
+                                            {% for error in field.errors %}
+                                            <p class="error-text">{{ error }}</p>
+                                            {% endfor %}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+
+                            <div class="page-actions">
+                                <button class="button button--primary" type="submit">{{ submit_label }}</button>
+                                <a class="button button--secondary" href="{{ back_url }}">Cancelar</a>
+                            </div>
+                        </section>
+                    </form>
+                </div>
+            </aside>
+        </div>
     </section>
 </div>
 {% endblock %}

@@ -1,7 +1,8 @@
-<article class="agenda-month">
+<article class="agenda-month{% if not calendar_interactive %} agenda-month--contextual{% endif %}">
     <div class="agenda-month__header">
         <h2>{{ visible_month_title }}</h2>
         <nav class="agenda-month__nav" aria-label="Navegacion visual del mes">
+            {% if calendar_interactive %}
             <a
                 class="agenda-month__nav-link"
                 href="{{ calendar_base_url }}?{{ previous_month_query }}"
@@ -29,6 +30,11 @@
             >
                 Siguiente
             </a>
+            {% else %}
+            <span class="agenda-month__nav-link agenda-month__nav-link--static">Anterior</span>
+            <span class="agenda-month__nav-separator">&middot;</span>
+            <span class="agenda-month__nav-link agenda-month__nav-link--static">Siguiente</span>
+            {% endif %}
         </nav>
     </div>
 
@@ -42,6 +48,7 @@
         {% for week in agenda_weeks %}
             {% for day in week %}
             <article class="agenda-day{% if day.outside %} agenda-day--outside{% endif %}{% if day.today %} agenda-day--today{% endif %}{% if day.selected %} agenda-day--selected{% endif %}">
+                {% if calendar_interactive %}
                 <a
                     class="agenda-day__link"
                     href="{{ calendar_base_url }}?{{ day.querystring }}"
@@ -54,6 +61,12 @@
                     {% endif %}
                     {% if day.selected %}aria-current="date"{% endif %}
                 >
+                {% else %}
+                <div
+                    class="agenda-day__link agenda-day__link--static"
+                    {% if day.selected %}aria-current="date"{% endif %}
+                >
+                {% endif %}
                     <div class="agenda-day__top">
                         <span class="agenda-day__number">{{ day.number }}</span>
                     </div>
@@ -62,7 +75,11 @@
                         <span class="agenda-day__marker{% if marker.kind %} agenda-day__marker--{{ marker.kind }}{% endif %}">{{ marker.label }}</span>
                         {% endfor %}
                     </div>
+                {% if calendar_interactive %}
                 </a>
+                {% else %}
+                </div>
+                {% endif %}
             </article>
             {% endfor %}
         {% endfor %}

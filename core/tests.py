@@ -1190,6 +1190,101 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertContains(history_response, self.review_service.name)
         self.assertContains(history_response, reverse("core:appointment_update", args=[appointment.pk]))
 
+    def test_update_view_rejects_manipulated_cancelled_appointment_in_blocked_slot(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00", "10:00"), capacity=1)
+        self._create_block(today, "10:00", label="Bloqueo interno")
+        appointment = self._create_existing_cancelled_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+        )
+
+        response = self.client.post(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            self._appointment_form_data(
+                client=appointment.client_id,
+                service=appointment.service_id,
+                day=today.isoformat(),
+                slot_time="10:00",
+                status=Appointment.Status.CANCELLED,
+                internal_notes="Intento manipulado a tramo bloqueado",
+                delete_mode="false",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "bloqueado")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.Status.CANCELLED)
+        self.assertEqual(appointment.slot_time, "09:00")
+
+    def test_update_view_rejects_manipulated_cancelled_appointment_outside_availability(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00",), capacity=1)
+        appointment = self._create_existing_cancelled_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+        )
+
+        response = self.client.post(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            self._appointment_form_data(
+                client=appointment.client_id,
+                service=appointment.service_id,
+                day=today.isoformat(),
+                slot_time="10:00",
+                status=Appointment.Status.CANCELLED,
+                internal_notes="Intento manipulado fuera de disponibilidad",
+                delete_mode="false",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "fuera de la disponibilidad")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.Status.CANCELLED)
+        self.assertEqual(appointment.slot_time, "09:00")
+
+    def test_update_view_rejects_manipulated_cancelled_appointment_in_complete_slot(self):
+        today = timezone.localdate()
+        self._create_weekly_availability(today, ("09:00", "10:00"), capacity=1)
+        appointment = self._create_existing_cancelled_appointment(
+            self.primary_client,
+            self.review_service,
+            today,
+            time(9, 0),
+        )
+        self._create_appointment(
+            self.secondary_client,
+            self.control_service,
+            today,
+            time(10, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        response = self.client.post(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            self._appointment_form_data(
+                client=appointment.client_id,
+                service=appointment.service_id,
+                day=today.isoformat(),
+                slot_time="10:00",
+                status=Appointment.Status.CANCELLED,
+                internal_notes="Intento manipulado a tramo completo",
+                delete_mode="false",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "capacidad maxima")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.Status.CANCELLED)
+        self.assertEqual(appointment.slot_time, "09:00")
+
     def test_update_view_requires_explicit_delete_confirmation_and_then_removes_appointment(self):
         today = timezone.localdate()
         self._create_weekly_availability(today, ("09:00",), capacity=1)
@@ -1429,7 +1524,32 @@ class AppEntryPointViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(metrics["Citas activas"], "03")
         self.assertEqual(metrics["Tramos con citas"], "03")
         self.assertEqual(metrics["Confirmadas"], "02")
-        self.assertEqual(metrics["Canceladas"], "00")
+        self.assertEqual(metrics["Canceladas"], "01")
+
+    def test_cancelled_metric_counts_selected_day_without_reintroducing_cancelled_entries(self):
+        today = timezone.localdate()
+        selected_day = today + timedelta(days=1)
+        self._create_weekly_availability(selected_day, ("09:00",), capacity=1)
+        self._create_existing_cancelled_appointment(
+            self.tertiary_client,
+            self.review_service,
+            selected_day,
+            time(9, 0),
+        )
+
+        response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": selected_day.year, "month": selected_day.month, "day": selected_day.day},
+        )
+
+        slot_09 = self._slot_context(response, "09:00")
+        metrics = {metric["label"]: metric["value"] for metric in response.context["agenda_metrics"]}
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(metrics["Canceladas"], "01")
+        self.assertEqual(slot_09["entries"], [])
+        self.assertEqual(slot_09["available_label"], "Disponible")
+        self.assertNotContains(response, self.tertiary_client.name)
 
     def test_daily_panel_complete_slot_keeps_edit_links_and_hides_create_action(self):
         today = timezone.localdate()

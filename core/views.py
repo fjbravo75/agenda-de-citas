@@ -385,7 +385,16 @@ def _build_day_panel(selected_day, return_url=""):
     }
 
 
-def _build_agenda_metrics(timeline_slots):
+def _cancelled_appointments_count_for_day(target_day):
+    start_at, end_at = _day_bounds(target_day)
+    return Appointment.objects.filter(
+        start_at__gte=start_at,
+        start_at__lt=end_at,
+        status=Appointment.Status.CANCELLED,
+    ).count()
+
+
+def _build_agenda_metrics(timeline_slots, selected_day):
     active_entries = sum(
         1
         for slot in timeline_slots
@@ -399,12 +408,7 @@ def _build_agenda_metrics(timeline_slots):
         for entry in slot["entries"]
         if entry["status_key"] == Appointment.Status.CONFIRMED
     )
-    cancelled_entries = sum(
-        1
-        for slot in timeline_slots
-        for entry in slot["entries"]
-        if entry["status_key"] == Appointment.Status.CANCELLED
-    )
+    cancelled_entries = _cancelled_appointments_count_for_day(selected_day)
 
     return [
         {
@@ -587,7 +591,7 @@ class AppEntryPointView(AppLoginRequiredMixin, TemplateView):
         )
         context.update(
             {
-                "agenda_metrics": _build_agenda_metrics(today_panel["agenda_timeline_slots"]),
+                "agenda_metrics": _build_agenda_metrics(today_panel["agenda_timeline_slots"], selected_day),
                 "today_context_label": _format_today_context_label(real_today),
             }
         )

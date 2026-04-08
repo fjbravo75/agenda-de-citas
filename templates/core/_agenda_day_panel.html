@@ -34,13 +34,46 @@
                     {% endfor %}
                 </div>
                 {% if slot.create_url %}
-                <a class="agenda-slot__state agenda-slot__state--available" href="{{ slot.create_url }}">{{ slot.create_label }}</a>
+                <div class="agenda-slot__meta-row">
+                    <div class="agenda-slot__meta-main">
+                        <a class="agenda-slot__meta-primary agenda-slot__state agenda-slot__state--available" href="{{ slot.create_url }}">{{ slot.create_label }}</a>
+                    </div>
+                </div>
                 {% endif %}
                 {% elif slot.blocked_label %}
-                <span class="agenda-slot__state agenda-slot__state--blocked">{{ slot.blocked_label }}</span>
+                <div class="agenda-slot__meta-row">
+                    <div class="agenda-slot__meta-main">
+                        <span class="agenda-slot__meta-primary agenda-slot__state agenda-slot__state--blocked">{{ slot.blocked_label }}</span>
+                    </div>
+                    {% if slot.block_action_label %}
+                    <div class="agenda-slot__meta-side">
+                        <form method="post" action="{% url 'core:availability_block_toggle' %}" class="agenda-slot__meta-action-form">
+                            {% csrf_token %}
+                            <input type="hidden" name="day" value="{{ selected_day_iso }}">
+                            <input type="hidden" name="slot_time" value="{{ slot.time }}">
+                            <button class="agenda-slot__meta-action agenda-slot__meta-action--success" type="submit">
+                                {{ slot.block_action_label }}
+                            </button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
                 {% elif slot.create_url %}
-                <span class="agenda-slot__state agenda-slot__state--available">{{ slot.available_label }}</span>
-                <a class="agenda-slot__state agenda-slot__state--available" href="{{ slot.create_url }}">{{ slot.create_label }}</a>
+                <div class="agenda-slot__meta-row">
+                    <div class="agenda-slot__meta-main">
+                        <a class="agenda-slot__meta-primary agenda-slot__state agenda-slot__state--available" href="{{ slot.create_url }}">{{ slot.create_label }}</a>
+                    </div>
+                    {% if slot.block_action_label %}
+                    <div class="agenda-slot__meta-side">
+                        <form method="post" action="{% url 'core:availability_block_toggle' %}" class="agenda-slot__meta-action-form">
+                            {% csrf_token %}
+                            <input type="hidden" name="day" value="{{ selected_day_iso }}">
+                            <input type="hidden" name="slot_time" value="{{ slot.time }}">
+                            <button class="agenda-slot__meta-action agenda-slot__meta-action--danger" type="submit">{{ slot.block_action_label }}</button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
                 {% elif slot.available_label %}
                 <span class="agenda-slot__state agenda-slot__state--available">{{ slot.available_label }}</span>
                 {% else %}

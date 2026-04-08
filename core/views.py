@@ -10,6 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.urls import reverse, reverse_lazy
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
+from django.views import View
 from django.views.generic import FormView, TemplateView
 from wagtail.admin.views.account import LogoutView as WagtailLogoutView
 
@@ -154,6 +155,15 @@ def _format_compact_day(target_day):
     return f"{target_day.day} {MONTH_NAMES[target_day.month]} {target_day.year}"
 
 
+def _parse_iso_day(raw_day):
+    if not raw_day:
+        return None
+    try:
+        return date.fromisoformat(raw_day)
+    except ValueError:
+        return None
+
+
 def _safe_next_url(request):
     raw_next = request.POST.get("next") or request.GET.get("next", "")
     if raw_next and url_has_allowed_host_and_scheme(
@@ -257,6 +267,7 @@ def _empty_timeline_slots():
             "can_book": False,
             "create_url": "",
             "create_label": "",
+            "block_action_label": "",
         }
         for slot_time in AGENDA_SLOT_TIMES
     ]
@@ -298,6 +309,16 @@ def _format_busy_slot_label(active_count, capacity):
     return f"{active_count} {active_label}"
 
 
+def _can_create_block_for_slot_state(slot_state):
+    if not slot_state:
+        return False
+    if slot_state.get("blocked_label"):
+        return False
+    if not slot_state.get("is_within_availability"):
+        return False
+    return slot_state.get("active_count", 0) == 0
+
+
 def _build_timeline_slots(target_day, appointments, return_url=""):
     slots = _empty_timeline_slots()
     slot_map = {slot["time"]: slot for slot in slots}
@@ -321,6 +342,11 @@ def _build_timeline_slots(target_day, appointments, return_url=""):
                 next_url=return_url or _agenda_url_for_day(target_day),
             )
             slot["create_label"] = "Nueva cita"
+
+        if state["blocked_label"]:
+            slot["block_action_label"] = "Quitar bloqueo"
+        elif _can_create_block_for_slot_state(state):
+            slot["block_action_label"] = "Bloquear"
 
         if slot["entries"]:
             if state["is_complete"]:
@@ -597,6 +623,38 @@ class AppEntryPointView(AppLoginRequiredMixin, TemplateView):
         )
         context.update(day_panel)
         return context
+
+
+class AvailabilityBlockToggleView(AppLoginRequiredMixin, View):
+    FIXED_BLOCK_LABEL = "Bloqueo puntual"
+
+    def post(self, request, *args, **kwargs):
+        target_day = _parse_iso_day(request.POST.get("day", ""))
+        slot_time = request.POST.get("slot_time", "")
+
+        if target_day is None:
+            return HttpResponseRedirect(_agenda_url_for_day(_real_today()))
+
+        redirect_url = _agenda_url_for_day(target_day)
+
+        if slot_time not in AGENDA_SLOT_TIMES:
+            return HttpResponseRedirect(redirect_url)
+
+        existing_block = AvailabilityBlock.objects.filter(day=target_day, slot_time=slot_time).first()
+        if existing_block is not None:
+            existing_block.delete()
+            return HttpResponseRedirect(redirect_url)
+
+        slot_state = agenda_slot_booking_state(target_day).get(slot_time, {})
+        if not _can_create_block_for_slot_state(slot_state):
+            return HttpResponseRedirect(redirect_url)
+
+        AvailabilityBlock.objects.create(
+            day=target_day,
+            slot_time=slot_time,
+            label=self.FIXED_BLOCK_LABEL,
+        )
+        return HttpResponseRedirect(redirect_url)
 
 
 class AppointmentFormViewBase(AppLoginRequiredMixin, FormView):

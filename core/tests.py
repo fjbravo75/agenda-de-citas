@@ -1347,6 +1347,133 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(Appointment.objects.filter(status=Appointment.Status.CANCELLED).count(), 0)
 
 
+class AvailabilityBlockToggleViewTests(AuthenticatedAgendaBaseTestCase):
+    def _slot_context(self, response, slot_time):
+        for slot in response.context["agenda_timeline_slots"]:
+            if slot["time"] == slot_time:
+                return slot
+        self.fail(f"Slot {slot_time} not found in agenda_timeline_slots.")
+
+    def _toggle_block(self, target_day, slot_time):
+        return self.client.post(
+            reverse("core:availability_block_toggle"),
+            {
+                "day": target_day.isoformat(),
+                "slot_time": slot_time,
+            },
+        )
+
+    def test_toggle_view_creates_valid_block_on_free_available_slot(self):
+        selected_day = timezone.localdate() + timedelta(days=2)
+        expected_redirect = (
+            f"{reverse('core:app_entrypoint')}?"
+            f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
+        )
+        self._create_weekly_availability(selected_day, ("10:00",), capacity=2)
+
+        response = self._toggle_block(selected_day, "10:00")
+
+        self.assertRedirects(response, expected_redirect, fetch_redirect_response=False)
+        self.assertTrue(
+            AvailabilityBlock.objects.filter(
+                day=selected_day,
+                slot_time="10:00",
+                label="Bloqueo puntual",
+            ).exists()
+        )
+
+        agenda_response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": selected_day.year, "month": selected_day.month, "day": selected_day.day},
+        )
+        slot_10 = self._slot_context(agenda_response, "10:00")
+        self.assertEqual(slot_10["blocked_label"], "Bloqueo puntual")
+        self.assertEqual(slot_10["entries"], [])
+
+    def test_toggle_view_removes_existing_block(self):
+        selected_day = timezone.localdate() + timedelta(days=3)
+        expected_redirect = (
+            f"{reverse('core:app_entrypoint')}?"
+            f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
+        )
+        self._create_weekly_availability(selected_day, ("10:00",), capacity=2)
+        self._create_block(selected_day, "10:00", label="Bloqueo puntual")
+
+        response = self._toggle_block(selected_day, "10:00")
+
+        self.assertRedirects(response, expected_redirect, fetch_redirect_response=False)
+        self.assertFalse(AvailabilityBlock.objects.filter(day=selected_day, slot_time="10:00").exists())
+
+        agenda_response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": selected_day.year, "month": selected_day.month, "day": selected_day.day},
+        )
+        slot_10 = self._slot_context(agenda_response, "10:00")
+        self.assertEqual(slot_10["blocked_label"], "")
+        self.assertEqual(slot_10["available_label"], "Disponible")
+
+    def test_toggle_view_rejects_block_creation_for_occupied_slot(self):
+        selected_day = timezone.localdate() + timedelta(days=4)
+        expected_redirect = (
+            f"{reverse('core:app_entrypoint')}?"
+            f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
+        )
+        self._create_weekly_availability(selected_day, ("10:00",), capacity=2)
+        self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            selected_day,
+            time(10, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        response = self._toggle_block(selected_day, "10:00")
+
+        self.assertRedirects(response, expected_redirect, fetch_redirect_response=False)
+        self.assertFalse(AvailabilityBlock.objects.filter(day=selected_day, slot_time="10:00").exists())
+
+        agenda_response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": selected_day.year, "month": selected_day.month, "day": selected_day.day},
+        )
+        slot_10 = self._slot_context(agenda_response, "10:00")
+        self.assertEqual(slot_10["blocked_label"], "")
+        self.assertEqual(len(slot_10["entries"]), 1)
+
+    def test_toggle_view_rejects_block_creation_outside_availability(self):
+        selected_day = timezone.localdate() + timedelta(days=5)
+        expected_redirect = (
+            f"{reverse('core:app_entrypoint')}?"
+            f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
+        )
+        self._create_weekly_availability(selected_day, ("09:00",), capacity=2)
+
+        response = self._toggle_block(selected_day, "10:00")
+
+        self.assertRedirects(response, expected_redirect, fetch_redirect_response=False)
+        self.assertFalse(AvailabilityBlock.objects.filter(day=selected_day, slot_time="10:00").exists())
+
+        agenda_response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": selected_day.year, "month": selected_day.month, "day": selected_day.day},
+        )
+        slot_10 = self._slot_context(agenda_response, "10:00")
+        self.assertEqual(slot_10["blocked_label"], "")
+        self.assertEqual(slot_10["unavailable_label"], "Fuera de disponibilidad")
+
+    def test_toggle_view_preserves_selected_day_context_after_action(self):
+        selected_day = timezone.localdate() + timedelta(days=6)
+        expected_redirect = (
+            f"{reverse('core:app_entrypoint')}?"
+            f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
+        )
+        self._create_weekly_availability(selected_day, ("11:00",), capacity=2)
+
+        response = self._toggle_block(selected_day, "11:00")
+
+        self.assertRedirects(response, expected_redirect, fetch_redirect_response=False)
+
+
 class ClientDetailViewTests(AuthenticatedAgendaBaseTestCase):
     def _client_detail_url(self, client, next_url=None):
         base_url = reverse("core:client_detail", args=[client.pk])

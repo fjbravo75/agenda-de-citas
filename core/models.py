@@ -28,6 +28,145 @@ class Weekday(models.IntegerChoices):
     SUNDAY = 6, "Domingo"
 
 
+class AgendaSettings(models.Model):
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    saturdays_non_working = models.BooleanField(default=True)
+    sundays_non_working = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "configuracion global de agenda"
+        verbose_name_plural = "configuracion global de agenda"
+
+    def __str__(self):
+        return "Configuracion global de agenda"
+
+    @classmethod
+    def get_solo(cls):
+        settings, _created = cls.objects.get_or_create(pk=1)
+        return settings
+
+    def clean(self):
+        super().clean()
+        if self.pk not in (None, 1):
+            raise ValidationError(
+                {"id": "La configuracion global de agenda debe usar el identificador fijo 1."}
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class ManualClosureQuerySet(models.QuerySet):
+    def covering_day(self, target_day):
+        return self.filter(start_date__lte=target_day, end_date__gte=target_day)
+
+
+class ManualClosure(models.Model):
+    class ReasonType(models.TextChoices):
+        VACATION = "vacation", "Vacaciones"
+        LOCAL_HOLIDAY = "local_holiday", "Festivo local"
+        BUSINESS_CLOSURE = "business_closure", "Cierre del negocio"
+        PERSONAL = "personal", "Asunto personal"
+        OTHER = "other", "Otro"
+
+    start_date = models.DateField(db_index=True)
+    end_date = models.DateField(db_index=True)
+    reason_type = models.CharField(
+        max_length=32,
+        choices=ReasonType.choices,
+        default=ReasonType.OTHER,
+    )
+    label = models.CharField(max_length=120, blank=True)
+    notes = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = ManualClosureQuerySet.as_manager()
+
+    class Meta:
+        ordering = ("start_date", "end_date", "id")
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(start_date__lte=F("end_date")),
+                name="core_manualclosure_valid_range",
+            ),
+        ]
+
+    @property
+    def display_label(self):
+        return self.label or self.get_reason_type_display()
+
+    def __str__(self):
+        if self.start_date == self.end_date:
+            date_label = f"{self.start_date:%Y-%m-%d}"
+        else:
+            date_label = f"{self.start_date:%Y-%m-%d} a {self.end_date:%Y-%m-%d}"
+        return f"{self.display_label} - {date_label}"
+
+    def covers_day(self, target_day):
+        return self.start_date <= target_day <= self.end_date
+
+    def clean(self):
+        super().clean()
+
+        errors = {}
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            errors["end_date"] = "La fecha final debe ser igual o posterior a la inicial."
+
+        if errors:
+            raise ValidationError(errors)
+
+        if self.start_date and self.end_date:
+            overlapping_closures = ManualClosure.objects.filter(
+                start_date__lte=self.end_date,
+                end_date__gte=self.start_date,
+            )
+            if self.pk:
+                overlapping_closures = overlapping_closures.exclude(pk=self.pk)
+
+            if overlapping_closures.exists():
+                raise ValidationError("El cierre manual se solapa con otro cierre existente.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class OfficialHolidayQuerySet(models.QuerySet):
+    def on_day(self, target_day):
+        return self.filter(day=target_day)
+
+
+class OfficialHoliday(models.Model):
+    class Source(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        BOE_NATIONAL_SYNC = "boe_national_sync", "Sync BOE nacional"
+
+    day = models.DateField(unique=True, db_index=True)
+    name = models.CharField(max_length=120)
+    source = models.CharField(
+        max_length=32,
+        choices=Source.choices,
+        default=Source.MANUAL,
+        db_index=True,
+    )
+
+    objects = OfficialHolidayQuerySet.as_manager()
+
+    class Meta:
+        ordering = ("day", "id")
+        verbose_name = "festivo oficial"
+        verbose_name_plural = "festivos oficiales"
+
+    def __str__(self):
+        return f"{self.day:%Y-%m-%d} - {self.name}"
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
 def _current_timezone():
     return timezone.get_current_timezone()
 
@@ -155,13 +294,22 @@ class Appointment(models.Model):
             raise ValidationError(errors)
 
         target_day = agenda_slot_day(self.start_at)
+        from .day_availability import DayAvailabilityResolver
+
+        resolved_day = DayAvailabilityResolver.resolve_for_global_agenda(target_day)
+        if not resolved_day.is_working_day and not self._keeps_same_slot_on_closed_day(
+            target_day,
+            exact_slot_time,
+        ):
+            errors["start_at"] = f"La agenda no opera el dia seleccionado: {resolved_day.label}."
+
         slot_state = agenda_slot_booking_state(target_day, exclude_pk=self.pk).get(exact_slot_time, {})
 
-        if not slot_state.get("is_within_availability"):
+        if not errors and not slot_state.get("is_within_availability"):
             errors["start_at"] = "El tramo seleccionado queda fuera de la disponibilidad."
-        elif slot_state.get("blocked_label"):
+        elif not errors and slot_state.get("blocked_label"):
             errors["start_at"] = "El tramo seleccionado esta bloqueado."
-        elif slot_state.get("is_complete"):
+        elif not errors and slot_state.get("is_complete"):
             errors["start_at"] = "El tramo seleccionado ya ha alcanzado su capacidad maxima."
 
         if errors:
@@ -170,6 +318,17 @@ class Appointment(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+    def _keeps_same_slot_on_closed_day(self, target_day, exact_slot_time):
+        if not self.pk:
+            return False
+        persisted_appointment = type(self).objects.filter(pk=self.pk).only("start_at").first()
+        if persisted_appointment is None:
+            return False
+        return (
+            persisted_appointment.slot_day == target_day
+            and persisted_appointment.slot_time == exact_slot_time
+        )
 
 
 class WeeklyAvailability(models.Model):

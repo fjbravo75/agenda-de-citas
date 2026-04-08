@@ -1,0 +1,48 @@
+{% extends "base_app.html" %}
+
+{% block title %}{{ page_title }} | Agenda de Citas{% endblock %}
+
+{% block body_class %}theme-root theme-app app-settings-screen{% endblock %}
+
+{% block content %}
+<section class="section-stack">
+    <header class="page-header">
+        <div class="page-header__copy">
+            <h1>{{ page_title }}</h1>
+            <p class="text-secondary">{{ page_description }}</p>
+        </div>
+        <div class="page-actions">
+            <a class="button button--secondary" href="{{ back_url }}">Volver a ajustes</a>
+        </div>
+    </header>
+</section>
+
+<section class="section-stack">
+    <article class="section-surface">
+        <div class="alert alert--danger">
+            <p>Este cierre dejara de estar disponible para futuras consultas de la agenda cuando confirmes la eliminacion.</p>
+        </div>
+
+        <div class="stack-sm">
+            <p><strong>{{ manual_closure.display_label }}</strong></p>
+            <p class="text-secondary">
+                {% if manual_closure.start_date == manual_closure.end_date %}
+                {{ manual_closure.start_date|date:"d/m/Y" }}
+                {% else %}
+                {{ manual_closure.start_date|date:"d/m/Y" }} a {{ manual_closure.end_date|date:"d/m/Y" }}
+                {% endif %}
+                · {{ manual_closure.get_reason_type_display }}
+            </p>
+            {% if manual_closure.notes %}
+            <p class="text-secondary">{{ manual_closure.notes }}</p>
+            {% endif %}
+        </div>
+
+        <form method="post" class="page-actions">
+            {% csrf_token %}
+            <button class="button button--danger" type="submit">Confirmar eliminacion</button>
+            <a class="button button--secondary" href="{{ back_url }}">Seguir editando</a>
+        </form>
+    </article>
+</section>
+{% endblock %}

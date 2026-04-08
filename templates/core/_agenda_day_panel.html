@@ -2,6 +2,12 @@
     <div class="agenda-panel__section">
         <p class="eyebrow agenda-panel__eyebrow">Día seleccionado</p>
         <h3 class="agenda-panel__date">{{ selected_day_title }}</h3>
+        {% if not selected_day_is_working_day %}
+        <p class="agenda-panel__status agenda-panel__status--{{ selected_day_status_kind }}">{{ selected_day_status_label }}</p>
+        {% if selected_day_status_notes %}
+        <p class="agenda-panel__status-copy">{{ selected_day_status_notes }}</p>
+        {% endif %}
+        {% endif %}
     </div>
 
     <div class="agenda-timeline" aria-label="Timeline fija del día seleccionado">

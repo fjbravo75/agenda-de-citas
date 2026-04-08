@@ -1,14 +1,21 @@
 from django.urls import path
 
 from .views import (
+    AgendaSettingsView,
     AvailabilityBlockToggleView,
     AppEntryPointView,
     AppLogoutView,
-    ClientDetailView,
-    ClientCreateView,
     AppointmentCreateView,
     AppointmentUpdateView,
     CalendarUIValidationView,
+    ClientCreateView,
+    ClientDetailView,
+    ManualClosureCreateView,
+    ManualClosureDeleteView,
+    ManualClosureUpdateView,
+    OfficialHolidayCreateView,
+    OfficialHolidayDeleteView,
+    OfficialHolidayUpdateView,
     UIValidationView,
 )
 
@@ -18,6 +25,37 @@ app_name = "core"
 urlpatterns = [
     path("", AppEntryPointView.as_view(), name="app_entrypoint"),
     path("logout/", AppLogoutView.as_view(), name="app_logout"),
+    path("settings/agenda/", AgendaSettingsView.as_view(), name="agenda_settings"),
+    path(
+        "settings/agenda/closures/new/",
+        ManualClosureCreateView.as_view(),
+        name="manual_closure_create",
+    ),
+    path(
+        "settings/agenda/closures/<int:pk>/edit/",
+        ManualClosureUpdateView.as_view(),
+        name="manual_closure_update",
+    ),
+    path(
+        "settings/agenda/closures/<int:pk>/delete/",
+        ManualClosureDeleteView.as_view(),
+        name="manual_closure_delete",
+    ),
+    path(
+        "settings/agenda/official-holidays/new/",
+        OfficialHolidayCreateView.as_view(),
+        name="official_holiday_create",
+    ),
+    path(
+        "settings/agenda/official-holidays/<int:pk>/edit/",
+        OfficialHolidayUpdateView.as_view(),
+        name="official_holiday_update",
+    ),
+    path(
+        "settings/agenda/official-holidays/<int:pk>/delete/",
+        OfficialHolidayDeleteView.as_view(),
+        name="official_holiday_delete",
+    ),
     path("availability-blocks/toggle/", AvailabilityBlockToggleView.as_view(), name="availability_block_toggle"),
     path("appointments/new/", AppointmentCreateView.as_view(), name="appointment_create"),
     path("appointments/<int:pk>/edit/", AppointmentUpdateView.as_view(), name="appointment_update"),

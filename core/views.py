@@ -2,6 +2,8 @@ from calendar import Calendar, monthrange
 from datetime import date, datetime, time, timedelta
 from urllib.parse import urlencode
 
+import requests
+from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
@@ -14,12 +16,24 @@ from django.views import View
 from django.views.generic import FormView, TemplateView
 from wagtail.admin.views.account import LogoutView as WagtailLogoutView
 
-from .forms import AppointmentForm, ClientForm
+from .day_availability import DayAvailabilityResolver
+from .forms import (
+    AgendaSettingsForm,
+    AppointmentForm,
+    ClientForm,
+    ManualClosureForm,
+    OfficialHolidayForm,
+    OfficialHolidaySyncForm,
+)
+from .management.commands.sync_official_holidays import BoeSyncError, import_boe_national_holidays
 from .models import (
     AGENDA_SLOT_TIMES,
+    AgendaSettings,
     Appointment,
     AvailabilityBlock,
     Client,
+    ManualClosure,
+    OfficialHoliday,
     agenda_assigned_slot_time,
     agenda_slot_booking_state,
 )
@@ -252,6 +266,10 @@ def _appointment_create_url_for_slot(target_day, slot_time, next_url=""):
     )
 
 
+def _agenda_settings_url():
+    return reverse("core:agenda_settings")
+
+
 def _empty_timeline_slots():
     return [
         {
@@ -309,6 +327,50 @@ def _format_busy_slot_label(active_count, capacity):
     return f"{active_count} {active_label}"
 
 
+def _day_status_kind(day_availability):
+    if day_availability.status == DayAvailabilityResolver.MANUAL_CLOSURE:
+        return "manual-closure"
+    if day_availability.status in {
+        DayAvailabilityResolver.NON_WORKING_SATURDAY,
+        DayAvailabilityResolver.NON_WORKING_SUNDAY,
+    }:
+        return "non-working"
+    return "working"
+
+
+def _is_closed_day(day_availability):
+    return day_availability is not None and not day_availability.is_working_day
+
+
+def _day_availability_resolver_for_range(start_day, end_day, *, agenda_settings=None):
+    settings = agenda_settings or AgendaSettings.get_solo()
+    manual_closures = ManualClosure.objects.filter(
+        start_date__lte=end_day,
+        end_date__gte=start_day,
+    ).order_by("start_date", "end_date", "id")
+    return DayAvailabilityResolver(
+        agenda_settings=settings,
+        manual_closures=manual_closures,
+    )
+
+
+def _month_day_availability_map(visible_year, visible_month, *, agenda_settings=None):
+    month_last_day_number = monthrange(visible_year, visible_month)[1]
+    month_start = date(visible_year, visible_month, 1)
+    month_last_day = date(visible_year, visible_month, month_last_day_number)
+    resolver = _day_availability_resolver_for_range(
+        month_start,
+        month_last_day,
+        agenda_settings=agenda_settings,
+    )
+    return {
+        date(visible_year, visible_month, day_number): resolver.resolve(
+            date(visible_year, visible_month, day_number)
+        )
+        for day_number in range(1, month_last_day_number + 1)
+    }
+
+
 def _can_create_block_for_slot_state(slot_state):
     if not slot_state:
         return False
@@ -319,10 +381,12 @@ def _can_create_block_for_slot_state(slot_state):
     return slot_state.get("active_count", 0) == 0
 
 
-def _build_timeline_slots(target_day, appointments, return_url=""):
+def _build_timeline_slots(target_day, appointments, return_url="", day_availability=None):
     slots = _empty_timeline_slots()
     slot_map = {slot["time"]: slot for slot in slots}
     slot_state = agenda_slot_booking_state(target_day)
+    resolved_day = day_availability or DayAvailabilityResolver.resolve_for_global_agenda(target_day)
+    day_is_closed = _is_closed_day(resolved_day)
 
     for appointment in appointments:
         slot_map[agenda_assigned_slot_time(appointment.start_at)]["entries"].append(
@@ -333,9 +397,9 @@ def _build_timeline_slots(target_day, appointments, return_url=""):
         state = slot_state[slot["time"]]
         slot["active_entries_count"] = state["active_count"]
         slot["capacity"] = state["capacity"]
-        slot["can_book"] = state["can_book"]
+        slot["can_book"] = state["can_book"] and not day_is_closed
 
-        if state["can_book"]:
+        if slot["can_book"]:
             slot["create_url"] = _appointment_create_url_for_slot(
                 target_day,
                 slot["time"],
@@ -343,10 +407,11 @@ def _build_timeline_slots(target_day, appointments, return_url=""):
             )
             slot["create_label"] = "Nueva cita"
 
-        if state["blocked_label"]:
-            slot["block_action_label"] = "Quitar bloqueo"
-        elif _can_create_block_for_slot_state(state):
-            slot["block_action_label"] = "Bloquear"
+        if not day_is_closed:
+            if state["blocked_label"]:
+                slot["block_action_label"] = "Quitar bloqueo"
+            elif _can_create_block_for_slot_state(state):
+                slot["block_action_label"] = "Bloquear"
 
         if slot["entries"]:
             if state["is_complete"]:
@@ -355,6 +420,10 @@ def _build_timeline_slots(target_day, appointments, return_url=""):
                 slot["busy_label"] = _format_busy_slot_label(state["active_count"], state["capacity"])
             else:
                 slot["busy_label"] = "Sin ocupacion activa"
+            continue
+
+        if day_is_closed:
+            slot["unavailable_label"] = resolved_day.label
             continue
 
         if state["blocked_label"]:
@@ -370,7 +439,10 @@ def _build_timeline_slots(target_day, appointments, return_url=""):
     return slots
 
 
-def _build_day_summary(timeline_slots):
+def _build_day_summary(timeline_slots, day_availability=None):
+    if _is_closed_day(day_availability):
+        return day_availability.label
+
     slots_with_appointments = sum(1 for slot in timeline_slots if slot["entries"])
     complete_slots = sum(1 for slot in timeline_slots if slot.get("complete_label"))
     blocked_slots = sum(1 for slot in timeline_slots if not slot["entries"] and slot["blocked_label"])
@@ -401,12 +473,27 @@ def _build_day_summary(timeline_slots):
     return _join_summary_parts(summary_parts)
 
 
-def _build_day_panel(selected_day, return_url=""):
+def _build_day_panel(selected_day, return_url="", agenda_settings=None):
+    day_availability = DayAvailabilityResolver.resolve_for_global_agenda(
+        selected_day,
+        agenda_settings=agenda_settings,
+    )
     appointments = _appointments_for_day(selected_day)
-    timeline_slots = _build_timeline_slots(selected_day, appointments, return_url=return_url)
+    timeline_slots = _build_timeline_slots(
+        selected_day,
+        appointments,
+        return_url=return_url,
+        day_availability=day_availability,
+    )
     return {
         "selected_day_title": _format_day_title(selected_day),
-        "selected_day_summary": _build_day_summary(timeline_slots),
+        "selected_day_summary": _build_day_summary(timeline_slots, day_availability=day_availability),
+        "selected_day_is_working_day": day_availability.is_working_day,
+        "selected_day_status_label": day_availability.label,
+        "selected_day_status_kind": _day_status_kind(day_availability),
+        "selected_day_status_notes": (
+            day_availability.manual_closure.notes if day_availability.manual_closure else ""
+        ),
         "agenda_timeline_slots": timeline_slots,
     }
 
@@ -460,10 +547,15 @@ def _build_agenda_metrics(timeline_slots, selected_day):
     ]
 
 
-def _month_summary(visible_year, visible_month):
+def _month_summary(visible_year, visible_month, *, agenda_settings=None):
     month_start = date(visible_year, visible_month, 1)
     next_year, next_month = _adjacent_month(visible_year, visible_month, 1)
     month_end = date(next_year, next_month, 1)
+    day_availability_map = _month_day_availability_map(
+        visible_year,
+        visible_month,
+        agenda_settings=agenda_settings,
+    )
 
     appointment_rows = (
         Appointment.objects.filter(
@@ -491,6 +583,7 @@ def _month_summary(visible_year, visible_month):
             "active_count": row["active_count"],
             "confirmed_count": row["confirmed_count"],
             "block_count": 0,
+            "day_availability": day_availability_map.get(row["local_day"]),
         }
         for row in appointment_rows
     }
@@ -498,9 +591,16 @@ def _month_summary(visible_year, visible_month):
     for row in block_rows:
         day_summary = summary.setdefault(
             row["day"],
-            {"active_count": 0, "confirmed_count": 0, "block_count": 0},
+            {"active_count": 0, "confirmed_count": 0, "block_count": 0, "day_availability": None},
         )
         day_summary["block_count"] = row["block_count"]
+
+    for target_day, day_availability in day_availability_map.items():
+        day_summary = summary.setdefault(
+            target_day,
+            {"active_count": 0, "confirmed_count": 0, "block_count": 0, "day_availability": None},
+        )
+        day_summary["day_availability"] = day_availability
 
     return summary
 
@@ -513,8 +613,17 @@ def _build_markers_for_day(target_day, visible_month_date, month_summary):
     active_entries = day_summary.get("active_count", 0)
     confirmed_entries = day_summary.get("confirmed_count", 0)
     blocked_slots = day_summary.get("block_count", 0)
+    day_availability = day_summary.get("day_availability")
+    day_is_closed = _is_closed_day(day_availability)
 
     markers = []
+    if day_is_closed:
+        markers.append(
+            {
+                "label": day_availability.label,
+                "kind": _day_status_kind(day_availability),
+            }
+        )
     if active_entries:
         markers.append(
             {
@@ -522,14 +631,14 @@ def _build_markers_for_day(target_day, visible_month_date, month_summary):
                 "kind": "busy",
             }
         )
-    if blocked_slots:
+    if blocked_slots and not day_is_closed:
         markers.append(
             {
                 "label": _format_count_label(blocked_slots, "bloqueo", "bloqueos"),
                 "kind": "blocked",
             }
         )
-    elif confirmed_entries:
+    elif confirmed_entries and not day_is_closed:
         markers.append(
             {
                 "label": _format_count_label(confirmed_entries, "confirmada", "confirmadas"),
@@ -547,6 +656,10 @@ def _build_agenda_weeks(visible_year, visible_month, selected_day, real_today, m
         week_days = []
         for week_day in week:
             is_outside = week_day.month != visible_month or week_day.year != visible_year
+            day_availability = month_summary.get(week_day, {}).get("day_availability")
+            day_status_kind = ""
+            if day_availability is not None and not day_availability.is_working_day:
+                day_status_kind = _day_status_kind(day_availability)
             week_days.append(
                 {
                     "number": week_day.day,
@@ -554,6 +667,7 @@ def _build_agenda_weeks(visible_year, visible_month, selected_day, real_today, m
                     "today": week_day == real_today and not is_outside,
                     "selected": week_day == selected_day,
                     "markers": _build_markers_for_day(week_day, visible_month_date, month_summary),
+                    "status_kind": day_status_kind,
                     "year": week_day.year,
                     "month": week_day.month,
                     "iso_date": week_day.isoformat(),
@@ -600,9 +714,18 @@ class AppEntryPointView(AppLoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         visible_year, visible_month, selected_day, real_today = _resolve_calendar_state(self.request)
-        day_panel = _build_day_panel(selected_day, return_url=self.request.get_full_path())
-        today_panel = _build_day_panel(real_today)
-        month_summary = _month_summary(visible_year, visible_month)
+        agenda_settings = AgendaSettings.get_solo()
+        day_panel = _build_day_panel(
+            selected_day,
+            return_url=self.request.get_full_path(),
+            agenda_settings=agenda_settings,
+        )
+        today_panel = _build_day_panel(real_today, agenda_settings=agenda_settings)
+        month_summary = _month_summary(
+            visible_year,
+            visible_month,
+            agenda_settings=agenda_settings,
+        )
         context.update(
             _build_calendar_context(
                 visible_year=visible_year,
@@ -625,6 +748,112 @@ class AppEntryPointView(AppLoginRequiredMixin, TemplateView):
         return context
 
 
+class AgendaSettingsView(AppLoginRequiredMixin, FormView):
+    template_name = "core/agenda_settings.html"
+    form_class = AgendaSettingsForm
+    SETTINGS_ACTION = "update_settings"
+    SYNC_OFFICIAL_HOLIDAYS_ACTION = "sync_official_holidays"
+
+    def get_settings(self):
+        return AgendaSettings.get_solo()
+
+    def get_settings_form(self, *, data=None):
+        kwargs = {"instance": self.get_settings()}
+        if data is not None:
+            kwargs["data"] = data
+        return AgendaSettingsForm(**kwargs)
+
+    def get_sync_form(self, *, data=None):
+        kwargs = {}
+        if data is not None:
+            kwargs["data"] = data
+        else:
+            kwargs["initial"] = {"year": _real_today().year}
+        return OfficialHolidaySyncForm(**kwargs)
+
+    def get_manual_closures(self):
+        return ManualClosure.objects.all()
+
+    def get_official_holidays(self):
+        return OfficialHoliday.objects.all()
+
+    def get(self, request, *args, **kwargs):
+        return self.render_to_response(
+            self.get_context_data(
+                form=self.get_settings_form(),
+                sync_form=self.get_sync_form(),
+            )
+        )
+
+    def post(self, request, *args, **kwargs):
+        action = request.POST.get("agenda_action", self.SETTINGS_ACTION)
+
+        if action == self.SYNC_OFFICIAL_HOLIDAYS_ACTION:
+            return self._handle_sync_post()
+        return self._handle_settings_post()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.setdefault("form", self.get_settings_form())
+        context.setdefault("sync_form", self.get_sync_form())
+        context.update(
+            {
+                "page_title": "Ajustes de agenda",
+                "page_description": (
+                    "Gestiona la configuracion global minima, los cierres manuales y los festivos"
+                    " oficiales de la agenda global."
+                ),
+                "back_url": reverse("core:app_entrypoint"),
+                "manual_closures": self.get_manual_closures(),
+                "manual_closure_create_url": reverse("core:manual_closure_create"),
+                "official_holidays": self.get_official_holidays(),
+                "official_holiday_create_url": reverse("core:official_holiday_create"),
+            }
+        )
+        return context
+
+    def _handle_settings_post(self):
+        form = self.get_settings_form(data=self.request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(self.request, "Configuracion guardada.")
+            return HttpResponseRedirect(_agenda_settings_url())
+
+        return self.render_to_response(
+            self.get_context_data(
+                form=form,
+                sync_form=self.get_sync_form(),
+            )
+        )
+
+    def _handle_sync_post(self):
+        sync_form = self.get_sync_form(data=self.request.POST)
+        if not sync_form.is_valid():
+            return self.render_to_response(
+                self.get_context_data(
+                    form=self.get_settings_form(),
+                    sync_form=sync_form,
+                )
+            )
+
+        target_year = sync_form.cleaned_data["year"]
+        try:
+            result = import_boe_national_holidays(target_year)
+        except (requests.RequestException, BoeSyncError) as error:
+            messages.error(self.request, f"No se pudo completar la importacion BOE {target_year}: {error}")
+        else:
+            messages.success(
+                self.request,
+                (
+                    f"Importacion BOE {target_year} completada. "
+                    f"Creados: {result.created_count}. "
+                    f"Ignorados existentes: {result.skipped_existing_count}. "
+                    f"Errores: {result.error_count}."
+                ),
+            )
+        return HttpResponseRedirect(_agenda_settings_url())
+
+
 class AvailabilityBlockToggleView(AppLoginRequiredMixin, View):
     FIXED_BLOCK_LABEL = "Bloqueo puntual"
 
@@ -638,6 +867,10 @@ class AvailabilityBlockToggleView(AppLoginRequiredMixin, View):
         redirect_url = _agenda_url_for_day(target_day)
 
         if slot_time not in AGENDA_SLOT_TIMES:
+            return HttpResponseRedirect(redirect_url)
+
+        day_availability = DayAvailabilityResolver.resolve_for_global_agenda(target_day)
+        if not day_availability.is_working_day:
             return HttpResponseRedirect(redirect_url)
 
         existing_block = AvailabilityBlock.objects.filter(day=target_day, slot_time=slot_time).first()
@@ -743,8 +976,13 @@ class AppointmentCreateView(AppointmentFormViewBase):
         visible_year = selected_day.year
         visible_month = selected_day.month
         real_today = _real_today()
-        month_summary = _month_summary(visible_year, visible_month)
-        day_panel = _build_day_panel(selected_day)
+        agenda_settings = AgendaSettings.get_solo()
+        month_summary = _month_summary(
+            visible_year,
+            visible_month,
+            agenda_settings=agenda_settings,
+        )
+        day_panel = _build_day_panel(selected_day, agenda_settings=agenda_settings)
         context.update(
             _build_calendar_context(
                 visible_year=visible_year,
@@ -792,7 +1030,11 @@ class AppointmentUpdateView(AppointmentFormViewBase):
         visible_year = selected_day.year
         visible_month = selected_day.month
         real_today = _real_today()
-        month_summary = _month_summary(visible_year, visible_month)
+        month_summary = _month_summary(
+            visible_year,
+            visible_month,
+            agenda_settings=AgendaSettings.get_solo(),
+        )
         context.update(
             _build_calendar_context(
                 visible_year=visible_year,
@@ -834,6 +1076,148 @@ class AppointmentUpdateView(AppointmentFormViewBase):
 
     def _delete_mode_requested(self):
         return self.request.POST.get("delete_mode") == "true"
+
+
+class ManualClosureFormViewBase(AppLoginRequiredMixin, FormView):
+    template_name = "core/manual_closure_form.html"
+    form_class = ManualClosureForm
+
+    def get_manual_closure(self):
+        return None
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["instance"] = self.get_manual_closure()
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        manual_closure = self.get_manual_closure()
+        is_edit = manual_closure is not None
+        context.update(
+            {
+                "page_title": "Editar cierre manual" if is_edit else "Nuevo cierre manual",
+                "page_description": (
+                    "Define un cierre de dia completo o un rango completo para la agenda global."
+                ),
+                "submit_label": "Guardar cambios" if is_edit else "Guardar cierre",
+                "back_url": _agenda_settings_url(),
+                "is_edit": is_edit,
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        form.save()
+        return HttpResponseRedirect(_agenda_settings_url())
+
+
+class ManualClosureCreateView(ManualClosureFormViewBase):
+    pass
+
+
+class ManualClosureUpdateView(ManualClosureFormViewBase):
+    def get_manual_closure(self):
+        if not hasattr(self, "_manual_closure"):
+            self._manual_closure = get_object_or_404(ManualClosure, pk=self.kwargs["pk"])
+        return self._manual_closure
+
+
+class ManualClosureDeleteView(AppLoginRequiredMixin, TemplateView):
+    template_name = "core/manual_closure_confirm_delete.html"
+
+    def get_manual_closure(self):
+        if not hasattr(self, "_manual_closure"):
+            self._manual_closure = get_object_or_404(ManualClosure, pk=self.kwargs["pk"])
+        return self._manual_closure
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        manual_closure = self.get_manual_closure()
+        context.update(
+            {
+                "page_title": "Eliminar cierre manual",
+                "page_description": "Confirma si quieres eliminar este cierre completo de la agenda.",
+                "manual_closure": manual_closure,
+                "back_url": _agenda_settings_url(),
+            }
+        )
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.get_manual_closure().delete()
+        return HttpResponseRedirect(_agenda_settings_url())
+
+
+class OfficialHolidayFormViewBase(AppLoginRequiredMixin, FormView):
+    template_name = "core/official_holiday_form.html"
+    form_class = OfficialHolidayForm
+
+    def get_official_holiday(self):
+        return None
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["instance"] = self.get_official_holiday()
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        official_holiday = self.get_official_holiday()
+        is_edit = official_holiday is not None
+        context.update(
+            {
+                "page_title": "Editar festivo oficial" if is_edit else "Nuevo festivo oficial",
+                "page_description": (
+                    "Marca una fecha oficial no operativa para que la agenda la trate como dia cerrado."
+                ),
+                "submit_label": "Guardar cambios" if is_edit else "Guardar festivo",
+                "back_url": _agenda_settings_url(),
+                "is_edit": is_edit,
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        form.save()
+        return HttpResponseRedirect(_agenda_settings_url())
+
+
+class OfficialHolidayCreateView(OfficialHolidayFormViewBase):
+    pass
+
+
+class OfficialHolidayUpdateView(OfficialHolidayFormViewBase):
+    def get_official_holiday(self):
+        if not hasattr(self, "_official_holiday"):
+            self._official_holiday = get_object_or_404(OfficialHoliday, pk=self.kwargs["pk"])
+        return self._official_holiday
+
+
+class OfficialHolidayDeleteView(AppLoginRequiredMixin, TemplateView):
+    template_name = "core/official_holiday_confirm_delete.html"
+
+    def get_official_holiday(self):
+        if not hasattr(self, "_official_holiday"):
+            self._official_holiday = get_object_or_404(OfficialHoliday, pk=self.kwargs["pk"])
+        return self._official_holiday
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        official_holiday = self.get_official_holiday()
+        context.update(
+            {
+                "page_title": "Eliminar festivo oficial",
+                "page_description": "Confirma si quieres retirar este festivo oficial de la agenda.",
+                "official_holiday": official_holiday,
+                "back_url": _agenda_settings_url(),
+            }
+        )
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.get_official_holiday().delete()
+        return HttpResponseRedirect(_agenda_settings_url())
 
 
 class ClientDetailView(AppLoginRequiredMixin, TemplateView):

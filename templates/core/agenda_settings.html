@@ -1,0 +1,234 @@
+{% extends "base_app.html" %}
+
+{% block title %}{{ page_title }} | Agenda de Citas{% endblock %}
+
+{% block body_class %}theme-root theme-app app-settings-screen{% endblock %}
+
+{% block content %}
+<section class="section-stack">
+    <header class="page-header">
+        <div class="page-header__copy">
+            <h1>{{ page_title }}</h1>
+            <p class="text-secondary">{{ page_description }}</p>
+        </div>
+        <div class="page-actions">
+            <a class="button button--secondary" href="{{ back_url }}">Volver a la agenda</a>
+        </div>
+    </header>
+</section>
+
+{% if messages %}
+<section class="section-stack">
+    {% for message in messages %}
+    <div class="alert alert--{{ message.tags|default:'info' }}">
+        <p>{{ message }}</p>
+    </div>
+    {% endfor %}
+</section>
+{% endif %}
+
+<section class="section-stack">
+    <article class="section-surface">
+        <div class="stack-sm">
+            <p class="eyebrow">Configuracion global</p>
+            <h2>Calendario laboral minimo</h2>
+            <p class="text-secondary">Estos ajustes quedan listos para que la agenda visual consulte un unico criterio de dia.</p>
+        </div>
+
+        <form method="post" class="section-stack">
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+            <div class="alert alert--danger">
+                {% for error in form.non_field_errors %}
+                <p>{{ error }}</p>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div class="form-grid">
+                {% for field in form %}
+                <div class="field field--full agenda-settings__choice-field">
+                    <label class="agenda-settings__choice">
+                        {{ field }}
+                        <span class="agenda-settings__choice-copy">
+                            <span>{{ field.label }}</span>
+                            <span class="agenda-settings__choice-value">
+                                {% if field.value %}Activado{% else %}Desactivado{% endif %}
+                            </span>
+                        </span>
+                    </label>
+                    {% if field.help_text %}
+                    <p class="help-text">{{ field.help_text }}</p>
+                    {% endif %}
+                    {% if field.errors %}
+                    <div class="field__feedback">
+                        {% for error in field.errors %}
+                        <p class="error-text">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="page-actions agenda-settings__actions">
+                <button class="button button--primary" type="submit">Guardar configuracion</button>
+            </div>
+        </form>
+    </article>
+</section>
+
+<section class="section-stack">
+    <article class="section-surface">
+        <div class="page-header">
+            <div class="page-header__copy">
+                <p class="eyebrow">Cierres manuales</p>
+                <h2>Agenda cerrada por dias completos</h2>
+                <p class="text-secondary">Gestiona cierres de un dia o de un rango completo sin usar bloqueos por tramo.</p>
+            </div>
+            <div class="page-actions">
+                <a class="button button--secondary" href="{{ manual_closure_create_url }}">Crear cierre</a>
+            </div>
+        </div>
+
+        {% if manual_closures %}
+        <div class="table-wrap">
+            <table class="table table--compact">
+                <thead>
+                    <tr>
+                        <th>Etiqueta</th>
+                        <th>Fechas</th>
+                        <th>Motivo</th>
+                        <th>Notas</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for manual_closure in manual_closures %}
+                    <tr>
+                        <td><strong>{{ manual_closure.display_label }}</strong></td>
+                        <td>
+                            {% if manual_closure.start_date == manual_closure.end_date %}
+                            {{ manual_closure.start_date|date:"d/m/Y" }}
+                            {% else %}
+                            {{ manual_closure.start_date|date:"d/m/Y" }} a {{ manual_closure.end_date|date:"d/m/Y" }}
+                            {% endif %}
+                        </td>
+                        <td>{{ manual_closure.get_reason_type_display }}</td>
+                        <td>{{ manual_closure.notes|default:"-" }}</td>
+                        <td>
+                            <div class="page-actions agenda-settings__table-actions">
+                                <a class="button button--secondary" href="{% url 'core:manual_closure_update' manual_closure.pk %}">Editar</a>
+                                <a class="button button--ghost" href="{% url 'core:manual_closure_delete' manual_closure.pk %}">Eliminar</a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p class="empty-state__icon">Sin cierres</p>
+            <p class="text-secondary">Todavia no hay cierres manuales guardados para la agenda global.</p>
+            <a class="button button--secondary" href="{{ manual_closure_create_url }}">Crear primer cierre</a>
+        </div>
+        {% endif %}
+    </article>
+</section>
+
+<section class="section-stack">
+    <article class="section-surface">
+        <div class="page-header">
+            <div class="page-header__copy">
+                <p class="eyebrow">Festivos oficiales</p>
+                <h2>Dias oficiales no operativos</h2>
+                <p class="text-secondary">Gestiona manualmente las fechas oficiales que deben cerrar la agenda sin depender todavia de sincronizacion.</p>
+            </div>
+            <div class="page-actions">
+                <a class="button button--secondary" href="{{ official_holiday_create_url }}">Crear festivo</a>
+            </div>
+        </div>
+
+        <div class="agenda-settings__sync-shell">
+            <div class="stack-sm">
+                <h3>Importar festivos nacionales desde BOE</h3>
+                <p class="text-secondary">Lanza una importacion manual por año. Se crean las fechas que faltan y se ignoran las que ya existen.</p>
+            </div>
+
+            <form method="post" class="section-stack">
+                {% csrf_token %}
+                <input type="hidden" name="agenda_action" value="sync_official_holidays">
+
+                {% if sync_form.non_field_errors %}
+                <div class="alert alert--danger">
+                    {% for error in sync_form.non_field_errors %}
+                    <p>{{ error }}</p>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                <div class="form-grid">
+                    {% for field in sync_form %}
+                    <div class="field">
+                        {{ field.label_tag }}
+                        {{ field }}
+                        {% if field.help_text %}
+                        <p class="help-text">{{ field.help_text }}</p>
+                        {% endif %}
+                        {% if field.errors %}
+                        <div class="field__feedback">
+                            {% for error in field.errors %}
+                            <p class="error-text">{{ error }}</p>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <div class="page-actions agenda-settings__actions">
+                    <button class="button button--secondary" type="submit">Importar BOE</button>
+                </div>
+            </form>
+        </div>
+
+        {% if official_holidays %}
+        <div class="table-wrap">
+            <table class="table table--compact">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Nombre</th>
+                        <th>Origen</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for official_holiday in official_holidays %}
+                    <tr>
+                        <td>{{ official_holiday.day|date:"d/m/Y" }}</td>
+                        <td><strong>{{ official_holiday.name }}</strong></td>
+                        <td>{{ official_holiday.get_source_display }}</td>
+                        <td>
+                            <div class="page-actions agenda-settings__table-actions">
+                                <a class="button button--secondary" href="{% url 'core:official_holiday_update' official_holiday.pk %}">Editar</a>
+                                <a class="button button--ghost" href="{% url 'core:official_holiday_delete' official_holiday.pk %}">Eliminar</a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p class="empty-state__icon">Sin festivos oficiales</p>
+            <p class="text-secondary">Todavia no hay festivos oficiales guardados para la agenda global.</p>
+            <a class="button button--secondary" href="{{ official_holiday_create_url }}">Crear primer festivo</a>
+        </div>
+        {% endif %}
+    </article>
+</section>
+{% endblock %}

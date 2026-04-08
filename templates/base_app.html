@@ -17,6 +17,7 @@
         <div class="header-row__secondary">
             <nav class="nav-cluster" aria-label="Navegacion interna">
                 <a class="nav-link{% if request.path == '/app/' %} is-active{% endif %}" href="/app/">Agenda</a>
+                <a class="nav-link{% if '/app/settings/agenda/' in request.path %} is-active{% endif %}" href="{% url 'core:agenda_settings' %}">Ajustes</a>
                 <a class="nav-link{% if request.path == '/app/ui/' %} is-active{% endif %}" href="/app/ui/">UI</a>
                 <a class="nav-link{% if request.path == '/app/calendar-ui/' %} is-active{% endif %}" href="/app/calendar-ui/">Mock</a>
                 <a class="nav-link" href="/">CMS</a>
@@ -50,6 +51,7 @@
         <div class="footer-row__aside">
             <div class="footer-links">
                 <a class="footer-link" href="/app/">Agenda</a>
+                <a class="footer-link" href="{% url 'core:agenda_settings' %}">Ajustes</a>
                 <a class="footer-link" href="/app/ui/">UI</a>
                 <a class="footer-link" href="/app/calendar-ui/">Mock</a>
                 <a class="footer-link" href="/">CMS</a>

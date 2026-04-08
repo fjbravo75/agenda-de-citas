@@ -4,10 +4,14 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
+from .day_availability import DayAvailabilityResolver
 from .models import (
     AGENDA_SLOT_TIME_CHOICES,
+    AgendaSettings,
     Appointment,
     Client,
+    ManualClosure,
+    OfficialHoliday,
     Service,
     agenda_slot_booking_state,
 )
@@ -39,6 +43,67 @@ class ClientForm(forms.ModelForm):
         widgets = {
             "notes": forms.Textarea(attrs={"rows": 4}),
         }
+
+
+class AgendaSettingsForm(forms.ModelForm):
+    class Meta:
+        model = AgendaSettings
+        fields = ("saturdays_non_working", "sundays_non_working")
+        labels = {
+            "saturdays_non_working": "Sabados no laborables",
+            "sundays_non_working": "Domingos no laborables",
+        }
+        help_texts = {
+            "saturdays_non_working": "Activa este ajuste si los sabados quedan fuera de la jornada ordinaria.",
+            "sundays_non_working": "Activa este ajuste si los domingos quedan fuera de la jornada ordinaria.",
+        }
+
+
+class ManualClosureForm(forms.ModelForm):
+    class Meta:
+        model = ManualClosure
+        fields = ("start_date", "end_date", "reason_type", "label", "notes")
+        labels = {
+            "start_date": "Fecha inicial",
+            "end_date": "Fecha final",
+            "reason_type": "Motivo",
+            "label": "Etiqueta visible",
+            "notes": "Notas internas",
+        }
+        help_texts = {
+            "label": "Opcional. Si lo dejas vacio, se mostrara el motivo elegido.",
+            "notes": "Opcional. Uso interno para dar contexto al cierre.",
+        }
+        widgets = {
+            "start_date": forms.DateInput(attrs={"type": "date"}),
+            "end_date": forms.DateInput(attrs={"type": "date"}),
+            "notes": forms.Textarea(attrs={"rows": 4}),
+        }
+
+
+class OfficialHolidayForm(forms.ModelForm):
+    class Meta:
+        model = OfficialHoliday
+        fields = ("day", "name")
+        labels = {
+            "day": "Fecha",
+            "name": "Nombre visible",
+        }
+        help_texts = {
+            "name": "Usa un nombre corto y reconocible para identificar el festivo en la agenda.",
+        }
+        widgets = {
+            "day": forms.DateInput(attrs={"type": "date"}),
+        }
+
+
+class OfficialHolidaySyncForm(forms.Form):
+    year = forms.IntegerField(
+        label="Año",
+        min_value=2000,
+        max_value=2100,
+        help_text="Importa los festivos nacionales de España publicados en el BOE para el año indicado.",
+    )
 
 
 class AppointmentForm(forms.Form):
@@ -142,6 +207,7 @@ class AppointmentForm(forms.Form):
         return timezone.localdate()
 
     def _configure_slot_field(self, target_day):
+        day_availability = DayAvailabilityResolver.resolve_for_global_agenda(target_day)
         slot_states = agenda_slot_booking_state(
             target_day,
             exclude_pk=self.instance.pk if self.instance.pk else None,
@@ -151,8 +217,10 @@ class AppointmentForm(forms.Form):
 
         for slot_time, _ in AGENDA_SLOT_TIME_CHOICES:
             slot_state = slot_states.get(slot_time, {})
-            slot_choices.append((slot_time, self._slot_choice_label(slot_time, slot_state)))
-            if not slot_state.get("can_book"):
+            slot_choices.append(
+                (slot_time, self._slot_choice_label(slot_time, slot_state, day_availability=day_availability))
+            )
+            if not self._slot_is_selectable_for_day(target_day, slot_time, slot_state, day_availability):
                 disabled_values.add(slot_time)
 
         self.fields["slot_time"].choices = slot_choices
@@ -172,6 +240,10 @@ class AppointmentForm(forms.Form):
         self.fields["status"].choices = status_choices
 
     def _first_bookable_slot(self, target_day):
+        day_availability = DayAvailabilityResolver.resolve_for_global_agenda(target_day)
+        if not day_availability.is_working_day:
+            return None
+
         slot_states = agenda_slot_booking_state(
             target_day,
             exclude_pk=self.instance.pk if self.instance.pk else None,
@@ -181,7 +253,11 @@ class AppointmentForm(forms.Form):
                 return slot_time
         return None
 
-    def _slot_choice_label(self, slot_time, slot_state):
+    def _slot_choice_label(self, slot_time, slot_state, *, day_availability):
+        if not day_availability.is_working_day:
+            suffix = day_availability.label
+            return f"{slot_time} · {suffix}"
+
         if slot_state.get("blocked_label"):
             suffix = slot_state["blocked_label"]
         elif not slot_state.get("is_within_availability"):
@@ -195,6 +271,18 @@ class AppointmentForm(forms.Form):
         else:
             suffix = "Disponible"
         return f"{slot_time} · {suffix}"
+
+    def _slot_is_selectable_for_day(self, target_day, slot_time, slot_state, day_availability):
+        if day_availability.is_working_day:
+            return slot_state.get("can_book")
+        return self._slot_matches_existing_assignment(target_day, slot_time)
+
+    def _slot_matches_existing_assignment(self, target_day, slot_time):
+        return (
+            bool(self.instance.pk)
+            and self.instance.slot_day == target_day
+            and self.instance.slot_time == slot_time
+        )
 
     def _slot_is_bookable(self, slot_time):
         if not slot_time:

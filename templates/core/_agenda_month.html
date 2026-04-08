@@ -47,7 +47,7 @@
     <div class="agenda-month__grid agenda-month__grid--weeks-{{ agenda_weeks|length }}">
         {% for week in agenda_weeks %}
             {% for day in week %}
-            <article class="agenda-day{% if day.outside %} agenda-day--outside{% endif %}{% if day.today %} agenda-day--today{% endif %}{% if day.selected %} agenda-day--selected{% endif %}">
+            <article class="agenda-day{% if day.outside %} agenda-day--outside{% endif %}{% if day.today %} agenda-day--today{% endif %}{% if day.selected %} agenda-day--selected{% endif %}{% if day.status_kind %} agenda-day--{{ day.status_kind }}{% endif %}">
                 {% if calendar_interactive %}
                 <a
                     class="agenda-day__link"

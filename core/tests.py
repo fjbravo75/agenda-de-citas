@@ -1,13 +1,34 @@
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
+from io import StringIO
+from unittest.mock import patch
 from urllib.parse import urlencode
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.management import CommandError, call_command
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Appointment, AvailabilityBlock, Client, Service, WeeklyAvailability
+from .management.commands.sync_official_holidays import (
+    BoeHolidayResolution,
+    BoeNationalHolidaySyncService,
+    BoeSyncError,
+    OfficialHolidayImport,
+    OfficialHolidaySyncResult,
+)
+from .forms import AgendaSettingsForm, ManualClosureForm, OfficialHolidayForm, OfficialHolidaySyncForm
+from .day_availability import DayAvailabilityResolver
+from .models import (
+    AgendaSettings,
+    Appointment,
+    AvailabilityBlock,
+    Client,
+    ManualClosure,
+    OfficialHoliday,
+    Service,
+    WeeklyAvailability,
+)
 
 
 class AgendaBaseTestCase(TestCase):
@@ -73,6 +94,13 @@ class AgendaBaseTestCase(TestCase):
 
     def login_app_user(self):
         self.client.force_login(self.app_user)
+
+    def _next_weekday(self, weekday, *, start_day=None, include_today=False):
+        base_day = start_day or timezone.localdate()
+        delta = (weekday - base_day.weekday()) % 7
+        if delta == 0 and not include_today:
+            delta = 7
+        return base_day + timedelta(days=delta)
 
 
 class AuthenticatedAgendaBaseTestCase(AgendaBaseTestCase):
@@ -276,6 +304,404 @@ class AppointmentSlotValidationTests(AgendaBaseTestCase):
 
         self.assertIn("capacidad maxima", str(raised.exception))
 
+    def test_appointment_on_non_working_saturday_is_rejected(self):
+        selected_day = self._next_weekday(5)
+        self._create_weekly_availability(selected_day, ("11:00",), capacity=2)
+
+        appointment = self._build_appointment(
+            self.primary_client,
+            self.review_service,
+            selected_day,
+            time(11, 0),
+            Appointment.Status.PENDING,
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            appointment.save()
+
+        self.assertIn("La agenda no opera el dia seleccionado", str(raised.exception))
+        self.assertIn("Sabado no laborable", str(raised.exception))
+
+    def test_appointment_on_non_working_sunday_is_rejected(self):
+        selected_day = self._next_weekday(6)
+        self._create_weekly_availability(selected_day, ("11:00",), capacity=2)
+
+        appointment = self._build_appointment(
+            self.primary_client,
+            self.review_service,
+            selected_day,
+            time(11, 0),
+            Appointment.Status.PENDING,
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            appointment.save()
+
+        self.assertIn("La agenda no opera el dia seleccionado", str(raised.exception))
+        self.assertIn("Domingo no laborable", str(raised.exception))
+
+    def test_appointment_on_manual_closure_is_rejected(self):
+        selected_day = self._next_weekday(2)
+        self._create_weekly_availability(selected_day, ("11:00",), capacity=2)
+        ManualClosure.objects.create(
+            start_date=selected_day,
+            end_date=selected_day,
+            reason_type=ManualClosure.ReasonType.VACATION,
+            label="Vacaciones de abril",
+        )
+
+        appointment = self._build_appointment(
+            self.primary_client,
+            self.review_service,
+            selected_day,
+            time(11, 0),
+            Appointment.Status.PENDING,
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            appointment.save()
+
+        self.assertIn("La agenda no opera el dia seleccionado", str(raised.exception))
+        self.assertIn("Vacaciones de abril", str(raised.exception))
+
+    def test_existing_appointment_can_keep_same_closed_slot_for_follow_up_edits(self):
+        selected_day = self._next_weekday(5)
+        settings = AgendaSettings.get_solo()
+        settings.saturdays_non_working = False
+        settings.save()
+        self._create_weekly_availability(selected_day, ("11:00",), capacity=2)
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            selected_day,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        settings.saturdays_non_working = True
+        settings.save()
+        appointment.internal_notes = "Seguimiento permitido"
+        appointment.save()
+
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.internal_notes, "Seguimiento permitido")
+
+
+class AgendaSettingsModelTests(TestCase):
+    def test_get_solo_creates_and_reuses_the_global_singleton(self):
+        first_settings = AgendaSettings.get_solo()
+        second_settings = AgendaSettings.get_solo()
+
+        self.assertEqual(first_settings.pk, 1)
+        self.assertEqual(second_settings.pk, 1)
+        self.assertEqual(AgendaSettings.objects.count(), 1)
+
+    def test_second_singleton_record_is_rejected(self):
+        AgendaSettings.get_solo()
+
+        with self.assertRaises(ValidationError):
+            AgendaSettings.objects.create(saturdays_non_working=False)
+
+        self.assertEqual(AgendaSettings.objects.count(), 1)
+
+
+class ManualClosureModelTests(TestCase):
+    def test_manual_closure_rejects_an_inverted_date_range(self):
+        with self.assertRaises(ValidationError) as raised:
+            ManualClosure.objects.create(
+                start_date=date(2026, 4, 12),
+                end_date=date(2026, 4, 11),
+                reason_type=ManualClosure.ReasonType.VACATION,
+            )
+
+        self.assertIn("fecha final", str(raised.exception))
+
+    def test_manual_closure_rejects_overlapping_ranges(self):
+        ManualClosure.objects.create(
+            start_date=date(2026, 4, 14),
+            end_date=date(2026, 4, 16),
+            reason_type=ManualClosure.ReasonType.BUSINESS_CLOSURE,
+            label="Cierre por reformas",
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            ManualClosure.objects.create(
+                start_date=date(2026, 4, 16),
+                end_date=date(2026, 4, 18),
+                reason_type=ManualClosure.ReasonType.OTHER,
+                label="Otro cierre",
+            )
+
+        self.assertIn("solapa", str(raised.exception))
+
+
+class OfficialHolidayModelTests(TestCase):
+    def test_official_holiday_defaults_to_manual_source(self):
+        holiday = OfficialHoliday.objects.create(day=date(2026, 4, 23), name="San Jorge")
+
+        self.assertEqual(holiday.source, OfficialHoliday.Source.MANUAL)
+
+    def test_official_holiday_rejects_duplicate_day(self):
+        OfficialHoliday.objects.create(day=date(2026, 4, 23), name="San Jorge")
+
+        with self.assertRaises(ValidationError) as raised:
+            OfficialHoliday.objects.create(day=date(2026, 4, 23), name="Otro festivo")
+
+        self.assertIn("day", raised.exception.message_dict)
+
+
+class BoeNationalHolidaySyncServiceTests(TestCase):
+    def test_extract_resolution_from_summary_returns_matching_resolution(self):
+        service = BoeNationalHolidaySyncService()
+        summary_payload = {
+            "diario": [
+                {
+                    "seccion": [
+                        {
+                            "departamento": [
+                                {
+                                    "epigrafe": [
+                                        {
+                                            "item": [
+                                                {
+                                                    "identificador": "BOE-A-2025-21667",
+                                                    "titulo": (
+                                                        "Resolución de 17 de octubre de 2025, de la Dirección General"
+                                                        " de Trabajo, por la que se publica la relación de fiestas"
+                                                        " laborales para el año 2026."
+                                                    ),
+                                                    "url_html": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-21667",
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+
+        result = service.extract_resolution_from_summary(
+            summary_payload,
+            service._normalize_text("relación de fiestas laborales para el año 2026"),
+        )
+
+        self.assertEqual(result.identifier, "BOE-A-2025-21667")
+        self.assertIn("fiestas laborales para el año 2026", result.title.lower())
+
+    def test_extract_national_holidays_filters_out_non_nationwide_rows(self):
+        service = BoeNationalHolidaySyncService()
+        resolution_html = """
+        <table>
+            <tr><th>Fecha de las fiestas</th><th>CCAA 1</th><th>CCAA 2</th></tr>
+            <tr><td>Enero</td><td></td><td></td></tr>
+            <tr><td>1 Año Nuevo.</td><td><abbr title="Fiesta nacional no sustituible">*</abbr></td><td><abbr title="Fiesta nacional no sustituible">*</abbr></td></tr>
+            <tr><td>6 Epifanía del Señor.</td><td><abbr title="Fiesta Nacional respecto de la que no se ha ejercido la facultad de sustitución">**</abbr></td><td><abbr title="Fiesta Nacional respecto de la que no se ha ejercido la facultad de sustitución">**</abbr></td></tr>
+            <tr><td>19 San José.</td><td><abbr title="Fiesta Nacional respecto de la que no se ha ejercido la facultad de sustitución">**</abbr></td><td></td></tr>
+            <tr><td>Abril</td><td></td><td></td></tr>
+            <tr><td>3 Viernes Santo.</td><td><abbr title="Fiesta nacional no sustituible">*</abbr></td><td><abbr title="Fiesta nacional no sustituible">*</abbr></td></tr>
+            <tr><td>23 San Jorge.</td><td><abbr title="Fiesta de Comunidad Autónoma">***</abbr></td><td></td></tr>
+        </table>
+        """
+
+        result = service.extract_national_holidays(2026, resolution_html)
+
+        self.assertEqual(
+            result,
+            [
+                OfficialHolidayImport(day=date(2026, 1, 1), name="Año Nuevo"),
+                OfficialHolidayImport(day=date(2026, 1, 6), name="Epifanía del Señor"),
+                OfficialHolidayImport(day=date(2026, 4, 3), name="Viernes Santo"),
+            ],
+        )
+
+
+class DayAvailabilityResolverTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.agenda_settings = AgendaSettings.get_solo()
+
+    def test_resolver_marks_a_regular_weekday_as_working_day(self):
+        target_day = date(2026, 4, 8)
+
+        result = DayAvailabilityResolver(
+            agenda_settings=self.agenda_settings,
+        ).resolve(target_day)
+
+        self.assertEqual(result.status, DayAvailabilityResolver.WORKING_DAY)
+        self.assertEqual(result.label, "Laborable")
+        self.assertTrue(result.is_working_day)
+        self.assertIsNone(result.manual_closure)
+        self.assertIsNone(result.official_holiday)
+
+    def test_resolver_marks_saturday_as_non_working_when_enabled(self):
+        target_day = date(2026, 4, 11)
+
+        result = DayAvailabilityResolver(
+            agenda_settings=self.agenda_settings,
+        ).resolve(target_day)
+
+        self.assertEqual(result.status, DayAvailabilityResolver.NON_WORKING_SATURDAY)
+        self.assertEqual(result.label, "Sabado no laborable")
+        self.assertFalse(result.is_working_day)
+
+    def test_resolver_marks_sunday_as_non_working_when_enabled(self):
+        target_day = date(2026, 4, 12)
+
+        result = DayAvailabilityResolver(
+            agenda_settings=self.agenda_settings,
+        ).resolve(target_day)
+
+        self.assertEqual(result.status, DayAvailabilityResolver.NON_WORKING_SUNDAY)
+        self.assertEqual(result.label, "Domingo no laborable")
+        self.assertFalse(result.is_working_day)
+
+    def test_resolver_can_leave_saturday_as_working_when_disabled(self):
+        self.agenda_settings.saturdays_non_working = False
+        self.agenda_settings.save()
+        target_day = date(2026, 4, 11)
+
+        result = DayAvailabilityResolver.resolve_for_global_agenda(target_day)
+
+        self.assertEqual(result.status, DayAvailabilityResolver.WORKING_DAY)
+        self.assertTrue(result.is_working_day)
+
+    def test_resolver_marks_official_holiday_on_weekday_as_non_working(self):
+        target_day = date(2026, 4, 23)
+        official_holiday = OfficialHoliday.objects.create(day=target_day, name="San Jorge")
+
+        result = DayAvailabilityResolver.resolve_for_global_agenda(target_day)
+
+        self.assertEqual(result.status, DayAvailabilityResolver.OFFICIAL_HOLIDAY)
+        self.assertEqual(result.label, "San Jorge")
+        self.assertFalse(result.is_working_day)
+        self.assertIsNone(result.manual_closure)
+        self.assertEqual(result.official_holiday, official_holiday)
+
+    def test_official_holiday_has_priority_over_non_working_weekend(self):
+        target_day = date(2026, 4, 11)
+        official_holiday = OfficialHoliday.objects.create(day=target_day, name="Festivo autonomico")
+
+        result = DayAvailabilityResolver.resolve_for_global_agenda(target_day)
+
+        self.assertEqual(result.status, DayAvailabilityResolver.OFFICIAL_HOLIDAY)
+        self.assertEqual(result.label, "Festivo autonomico")
+        self.assertFalse(result.is_working_day)
+        self.assertEqual(result.official_holiday, official_holiday)
+
+    def test_manual_closure_has_priority_over_non_working_weekend(self):
+        target_day = date(2026, 4, 12)
+        manual_closure = ManualClosure.objects.create(
+            start_date=target_day,
+            end_date=target_day,
+            reason_type=ManualClosure.ReasonType.VACATION,
+            label="Vacaciones de abril",
+        )
+
+        result = DayAvailabilityResolver.resolve_for_global_agenda(target_day)
+
+        self.assertEqual(result.status, DayAvailabilityResolver.MANUAL_CLOSURE)
+        self.assertEqual(result.label, "Vacaciones de abril")
+        self.assertFalse(result.is_working_day)
+        self.assertEqual(result.manual_closure, manual_closure)
+        self.assertIsNone(result.official_holiday)
+
+    def test_manual_closure_has_priority_over_official_holiday(self):
+        target_day = date(2026, 4, 21)
+        official_holiday = OfficialHoliday.objects.create(day=target_day, name="Festivo local")
+        manual_closure = ManualClosure.objects.create(
+            start_date=target_day,
+            end_date=target_day,
+            reason_type=ManualClosure.ReasonType.BUSINESS_CLOSURE,
+            label="Cierre excepcional",
+        )
+
+        result = DayAvailabilityResolver.resolve_for_global_agenda(target_day)
+
+        self.assertEqual(result.status, DayAvailabilityResolver.MANUAL_CLOSURE)
+        self.assertEqual(result.label, "Cierre excepcional")
+        self.assertFalse(result.is_working_day)
+        self.assertEqual(result.manual_closure, manual_closure)
+        self.assertIsNone(result.official_holiday)
+        self.assertEqual(official_holiday.name, "Festivo local")
+
+    def test_manual_closure_range_is_resolved_for_any_day_inside_the_range(self):
+        ManualClosure.objects.create(
+            start_date=date(2026, 4, 20),
+            end_date=date(2026, 4, 22),
+            reason_type=ManualClosure.ReasonType.PERSONAL,
+        )
+
+        result = DayAvailabilityResolver.resolve_for_global_agenda(date(2026, 4, 21))
+
+        self.assertEqual(result.status, DayAvailabilityResolver.MANUAL_CLOSURE)
+        self.assertEqual(result.label, "Asunto personal")
+        self.assertFalse(result.is_working_day)
+
+
+class AgendaSettingsFormTests(TestCase):
+    def test_form_updates_existing_singleton_instance(self):
+        settings = AgendaSettings.get_solo()
+        form = AgendaSettingsForm(
+            data={
+                "saturdays_non_working": "on",
+            },
+            instance=settings,
+        )
+
+        self.assertTrue(form.is_valid())
+        saved_settings = form.save()
+
+        self.assertTrue(saved_settings.saturdays_non_working)
+        self.assertFalse(saved_settings.sundays_non_working)
+
+
+class ManualClosureFormTests(TestCase):
+    def test_form_surfaces_overlapping_model_validation(self):
+        ManualClosure.objects.create(
+            start_date=date(2026, 4, 14),
+            end_date=date(2026, 4, 16),
+            reason_type=ManualClosure.ReasonType.BUSINESS_CLOSURE,
+        )
+
+        form = ManualClosureForm(
+            data={
+                "start_date": "2026-04-16",
+                "end_date": "2026-04-18",
+                "reason_type": ManualClosure.ReasonType.OTHER,
+                "label": "",
+                "notes": "",
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("solapa", str(form.non_field_errors()))
+
+
+class OfficialHolidayFormTests(TestCase):
+    def test_form_surfaces_unique_day_validation(self):
+        OfficialHoliday.objects.create(day=date(2026, 4, 23), name="San Jorge")
+
+        form = OfficialHolidayForm(
+            data={
+                "day": "2026-04-23",
+                "name": "Otro festivo",
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("day", form.errors)
+
+
+class OfficialHolidaySyncFormTests(TestCase):
+    def test_form_requires_a_valid_year(self):
+        form = OfficialHolidaySyncForm(data={"year": ""})
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("year", form.errors)
+
 
 class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
     def _assert_redirects_to_login(self, response, next_url):
@@ -370,6 +796,73 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
 
     def test_calendar_ui_preview_redirects_anonymous_user_to_wagtail_login(self):
         requested_url = reverse("core:calendar_ui_preview")
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_agenda_settings_redirects_anonymous_user_to_wagtail_login(self):
+        requested_url = reverse("core:agenda_settings")
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_manual_closure_create_redirects_anonymous_user_to_wagtail_login(self):
+        requested_url = reverse("core:manual_closure_create")
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_manual_closure_update_redirects_anonymous_user_to_wagtail_login(self):
+        manual_closure = ManualClosure.objects.create(
+            start_date=timezone.localdate(),
+            end_date=timezone.localdate(),
+            reason_type=ManualClosure.ReasonType.OTHER,
+        )
+        requested_url = reverse("core:manual_closure_update", args=[manual_closure.pk])
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_manual_closure_delete_redirects_anonymous_user_to_wagtail_login(self):
+        manual_closure = ManualClosure.objects.create(
+            start_date=timezone.localdate(),
+            end_date=timezone.localdate(),
+            reason_type=ManualClosure.ReasonType.OTHER,
+        )
+        requested_url = reverse("core:manual_closure_delete", args=[manual_closure.pk])
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_official_holiday_create_redirects_anonymous_user_to_wagtail_login(self):
+        requested_url = reverse("core:official_holiday_create")
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_official_holiday_update_redirects_anonymous_user_to_wagtail_login(self):
+        official_holiday = OfficialHoliday.objects.create(
+            day=timezone.localdate(),
+            name="San Jorge",
+        )
+        requested_url = reverse("core:official_holiday_update", args=[official_holiday.pk])
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_official_holiday_delete_redirects_anonymous_user_to_wagtail_login(self):
+        official_holiday = OfficialHoliday.objects.create(
+            day=timezone.localdate(),
+            name="San Jorge",
+        )
+        requested_url = reverse("core:official_holiday_delete", args=[official_holiday.pk])
 
         response = self.client.get(requested_url)
 
@@ -847,6 +1340,66 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertContains(response, "capacidad maxima")
         self.assertEqual(Appointment.objects.count(), 2)
 
+    def test_create_view_rejects_non_working_saturday(self):
+        selected_day = self._next_weekday(5)
+        self._create_weekly_availability(selected_day, ("11:00",), capacity=2)
+
+        response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(
+                day=selected_day.isoformat(),
+                slot_time="11:00",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Appointment.objects.count(), 0)
+        self.assertIn("slot_time", response.context["form"].errors)
+        self.assertContains(response, "La agenda no opera el dia seleccionado")
+        self.assertContains(response, "Sabado no laborable")
+
+    def test_create_view_rejects_non_working_sunday(self):
+        selected_day = self._next_weekday(6)
+        self._create_weekly_availability(selected_day, ("11:00",), capacity=2)
+
+        response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(
+                day=selected_day.isoformat(),
+                slot_time="11:00",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Appointment.objects.count(), 0)
+        self.assertIn("slot_time", response.context["form"].errors)
+        self.assertContains(response, "La agenda no opera el dia seleccionado")
+        self.assertContains(response, "Domingo no laborable")
+
+    def test_create_view_rejects_manual_closure(self):
+        selected_day = self._next_weekday(2)
+        self._create_weekly_availability(selected_day, ("11:00",), capacity=2)
+        ManualClosure.objects.create(
+            start_date=selected_day,
+            end_date=selected_day,
+            reason_type=ManualClosure.ReasonType.VACATION,
+            label="Vacaciones de abril",
+        )
+
+        response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(
+                day=selected_day.isoformat(),
+                slot_time="11:00",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Appointment.objects.count(), 0)
+        self.assertIn("slot_time", response.context["form"].errors)
+        self.assertContains(response, "La agenda no opera el dia seleccionado")
+        self.assertContains(response, "Vacaciones de abril")
+
     def test_create_view_accepts_third_appointment_when_capacity_is_three_and_rejects_fourth(self):
         today = timezone.localdate()
         self._create_weekly_availability(today, ("11:00",), capacity=3)
@@ -1081,6 +1634,39 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(appointment.slot_time, "11:00")
         self.assertEqual(appointment.status, Appointment.Status.PENDING)
         self.assertEqual(appointment.internal_notes, "Cambio valido")
+
+    def test_update_view_rejects_move_to_non_operational_day(self):
+        working_day = self._next_weekday(2)
+        closed_day = self._next_weekday(5, start_day=working_day)
+        self._create_weekly_availability(working_day, ("11:00",), capacity=2)
+        self._create_weekly_availability(closed_day, ("11:00",), capacity=2)
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            working_day,
+            time(11, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        response = self.client.post(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            self._appointment_form_data(
+                client=appointment.client_id,
+                service=appointment.service_id,
+                day=closed_day.isoformat(),
+                slot_time="11:00",
+                status=appointment.status,
+                internal_notes="Intento en sabado cerrado",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("slot_time", response.context["form"].errors)
+        self.assertContains(response, "La agenda no opera el dia seleccionado")
+        self.assertContains(response, "Sabado no laborable")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.slot_day, working_day)
+        self.assertEqual(appointment.slot_time, "11:00")
 
     def test_update_view_shows_cancellation_notice_when_appointment_is_cancelled(self):
         today = timezone.localdate()
@@ -1364,7 +1950,7 @@ class AvailabilityBlockToggleViewTests(AuthenticatedAgendaBaseTestCase):
         )
 
     def test_toggle_view_creates_valid_block_on_free_available_slot(self):
-        selected_day = timezone.localdate() + timedelta(days=2)
+        selected_day = self._next_weekday(4)
         expected_redirect = (
             f"{reverse('core:app_entrypoint')}?"
             f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
@@ -1391,7 +1977,7 @@ class AvailabilityBlockToggleViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(slot_10["entries"], [])
 
     def test_toggle_view_removes_existing_block(self):
-        selected_day = timezone.localdate() + timedelta(days=3)
+        selected_day = self._next_weekday(0)
         expected_redirect = (
             f"{reverse('core:app_entrypoint')}?"
             f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
@@ -1413,7 +1999,7 @@ class AvailabilityBlockToggleViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(slot_10["available_label"], "Disponible")
 
     def test_toggle_view_rejects_block_creation_for_occupied_slot(self):
-        selected_day = timezone.localdate() + timedelta(days=4)
+        selected_day = self._next_weekday(1)
         expected_redirect = (
             f"{reverse('core:app_entrypoint')}?"
             f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
@@ -1441,7 +2027,7 @@ class AvailabilityBlockToggleViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(len(slot_10["entries"]), 1)
 
     def test_toggle_view_rejects_block_creation_outside_availability(self):
-        selected_day = timezone.localdate() + timedelta(days=5)
+        selected_day = self._next_weekday(2)
         expected_redirect = (
             f"{reverse('core:app_entrypoint')}?"
             f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
@@ -1462,7 +2048,7 @@ class AvailabilityBlockToggleViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(slot_10["unavailable_label"], "Fuera de disponibilidad")
 
     def test_toggle_view_preserves_selected_day_context_after_action(self):
-        selected_day = timezone.localdate() + timedelta(days=6)
+        selected_day = self._next_weekday(3)
         expected_redirect = (
             f"{reverse('core:app_entrypoint')}?"
             f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
@@ -1472,6 +2058,71 @@ class AvailabilityBlockToggleViewTests(AuthenticatedAgendaBaseTestCase):
         response = self._toggle_block(selected_day, "11:00")
 
         self.assertRedirects(response, expected_redirect, fetch_redirect_response=False)
+
+    def test_toggle_view_rejects_non_working_saturday(self):
+        selected_day = self._next_weekday(5)
+        expected_redirect = (
+            f"{reverse('core:app_entrypoint')}?"
+            f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
+        )
+        self._create_weekly_availability(selected_day, ("10:00",), capacity=2)
+
+        response = self._toggle_block(selected_day, "10:00")
+
+        self.assertRedirects(response, expected_redirect, fetch_redirect_response=False)
+        self.assertFalse(AvailabilityBlock.objects.filter(day=selected_day, slot_time="10:00").exists())
+
+    def test_toggle_view_rejects_non_working_sunday(self):
+        selected_day = self._next_weekday(6)
+        expected_redirect = (
+            f"{reverse('core:app_entrypoint')}?"
+            f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
+        )
+        self._create_weekly_availability(selected_day, ("10:00",), capacity=2)
+
+        response = self._toggle_block(selected_day, "10:00")
+
+        self.assertRedirects(response, expected_redirect, fetch_redirect_response=False)
+        self.assertFalse(AvailabilityBlock.objects.filter(day=selected_day, slot_time="10:00").exists())
+
+    def test_toggle_view_rejects_manual_closure(self):
+        selected_day = self._next_weekday(2)
+        expected_redirect = (
+            f"{reverse('core:app_entrypoint')}?"
+            f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
+        )
+        self._create_weekly_availability(selected_day, ("10:00",), capacity=2)
+        ManualClosure.objects.create(
+            start_date=selected_day,
+            end_date=selected_day,
+            reason_type=ManualClosure.ReasonType.LOCAL_HOLIDAY,
+            label="Cierre especial",
+        )
+
+        response = self._toggle_block(selected_day, "10:00")
+
+        self.assertRedirects(response, expected_redirect, fetch_redirect_response=False)
+        self.assertFalse(AvailabilityBlock.objects.filter(day=selected_day, slot_time="10:00").exists())
+
+    def test_toggle_view_keeps_existing_block_when_day_becomes_non_operational(self):
+        selected_day = self._next_weekday(2)
+        expected_redirect = (
+            f"{reverse('core:app_entrypoint')}?"
+            f"{urlencode({'year': selected_day.year, 'month': selected_day.month, 'day': selected_day.day})}"
+        )
+        self._create_weekly_availability(selected_day, ("10:00",), capacity=2)
+        self._create_block(selected_day, "10:00", label="Bloqueo puntual")
+        ManualClosure.objects.create(
+            start_date=selected_day,
+            end_date=selected_day,
+            reason_type=ManualClosure.ReasonType.LOCAL_HOLIDAY,
+            label="Cierre especial",
+        )
+
+        response = self._toggle_block(selected_day, "10:00")
+
+        self.assertRedirects(response, expected_redirect, fetch_redirect_response=False)
+        self.assertTrue(AvailabilityBlock.objects.filter(day=selected_day, slot_time="10:00").exists())
 
 
 class ClientDetailViewTests(AuthenticatedAgendaBaseTestCase):
@@ -1631,13 +2282,15 @@ class AppEntryPointViewTests(AuthenticatedAgendaBaseTestCase):
             reverse("core:app_entrypoint"),
             {"year": today.year, "month": today.month, "day": today.day},
         )
+        slot_11 = self._slot_context(response, "11:00")
+        slot_13 = self._slot_context(response, "13:00")
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Claudia Real")
         self.assertContains(response, "10:00")
         self.assertContains(response, "Bloqueo interno")
-        self.assertContains(response, "Disponible")
-        self.assertContains(response, "Fuera de disponibilidad")
+        self.assertEqual(slot_11["available_label"], "Disponible")
+        self.assertEqual(slot_13["unavailable_label"], "Fuera de disponibilidad")
         self.assertNotContains(response, "Nora Real")
         self.assertContains(response, reverse("core:appointment_create"))
         self.assertContains(response, reverse("core:appointment_update", args=[first_appointment.pk]))
@@ -1655,7 +2308,7 @@ class AppEntryPointViewTests(AuthenticatedAgendaBaseTestCase):
 
     def test_cancelled_metric_counts_selected_day_without_reintroducing_cancelled_entries(self):
         today = timezone.localdate()
-        selected_day = today + timedelta(days=1)
+        selected_day = self._next_weekday(3, start_day=today)
         self._create_weekly_availability(selected_day, ("09:00",), capacity=1)
         self._create_existing_cancelled_appointment(
             self.tertiary_client,
@@ -1731,7 +2384,7 @@ class AppEntryPointViewTests(AuthenticatedAgendaBaseTestCase):
 
     def test_month_markers_keep_active_count_and_add_block_signal(self):
         today = timezone.localdate()
-        selected_day = today + timedelta(days=1)
+        selected_day = self._next_weekday(4, start_day=today)
         self._create_weekly_availability(selected_day, ("09:00", "10:00", "11:00"))
         self._create_block(selected_day, "11:00")
         self._create_appointment(
@@ -1765,6 +2418,79 @@ class AppEntryPointViewTests(AuthenticatedAgendaBaseTestCase):
             [marker["label"] for marker in day_context["markers"]],
             ["2 citas", "1 bloqueo"],
         )
+
+    def test_month_and_panel_mark_saturday_as_non_working(self):
+        selected_day = self._next_weekday(5)
+        self._create_weekly_availability(selected_day, ("09:00", "10:00"))
+
+        response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": selected_day.year, "month": selected_day.month, "day": selected_day.day},
+        )
+
+        day_context = self._day_context(response, selected_day)
+        slot_09 = self._slot_context(response, "09:00")
+
+        self.assertEqual(day_context["status_kind"], "non-working")
+        self.assertEqual([marker["label"] for marker in day_context["markers"]], ["Sabado no laborable"])
+        self.assertFalse(response.context["selected_day_is_working_day"])
+        self.assertEqual(response.context["selected_day_status_label"], "Sabado no laborable")
+        self.assertEqual(slot_09["create_url"], "")
+        self.assertEqual(slot_09["block_action_label"], "")
+        self.assertEqual(slot_09["available_label"], "")
+        self.assertEqual(slot_09["unavailable_label"], "Sabado no laborable")
+        self.assertContains(response, "Sabado no laborable")
+
+    def test_month_and_panel_mark_sunday_as_non_working(self):
+        selected_day = self._next_weekday(6)
+        self._create_weekly_availability(selected_day, ("09:00",))
+
+        response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": selected_day.year, "month": selected_day.month, "day": selected_day.day},
+        )
+
+        day_context = self._day_context(response, selected_day)
+        slot_09 = self._slot_context(response, "09:00")
+
+        self.assertEqual(day_context["status_kind"], "non-working")
+        self.assertEqual([marker["label"] for marker in day_context["markers"]], ["Domingo no laborable"])
+        self.assertFalse(response.context["selected_day_is_working_day"])
+        self.assertEqual(response.context["selected_day_status_label"], "Domingo no laborable")
+        self.assertEqual(slot_09["create_url"], "")
+        self.assertEqual(slot_09["block_action_label"], "")
+        self.assertEqual(slot_09["unavailable_label"], "Domingo no laborable")
+        self.assertContains(response, "Domingo no laborable")
+
+    def test_manual_closure_has_priority_over_weekend_in_month_and_panel(self):
+        selected_day = self._next_weekday(5)
+        self._create_weekly_availability(selected_day, ("09:00",))
+        ManualClosure.objects.create(
+            start_date=selected_day,
+            end_date=selected_day,
+            reason_type=ManualClosure.ReasonType.VACATION,
+            label="Vacaciones de abril",
+            notes="Cierre completo del sabado",
+        )
+
+        response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": selected_day.year, "month": selected_day.month, "day": selected_day.day},
+        )
+
+        day_context = self._day_context(response, selected_day)
+        slot_09 = self._slot_context(response, "09:00")
+
+        self.assertEqual(day_context["status_kind"], "manual-closure")
+        self.assertEqual([marker["label"] for marker in day_context["markers"]], ["Vacaciones de abril"])
+        self.assertFalse(response.context["selected_day_is_working_day"])
+        self.assertEqual(response.context["selected_day_status_kind"], "manual-closure")
+        self.assertEqual(response.context["selected_day_status_label"], "Vacaciones de abril")
+        self.assertEqual(response.context["selected_day_status_notes"], "Cierre completo del sabado")
+        self.assertEqual(slot_09["create_url"], "")
+        self.assertEqual(slot_09["block_action_label"], "")
+        self.assertEqual(slot_09["unavailable_label"], "Vacaciones de abril")
+        self.assertContains(response, "Vacaciones de abril")
 
     def test_daily_panel_empty_slot_exposes_create_action_with_contextual_url(self):
         today = timezone.localdate()
@@ -1932,3 +2658,405 @@ class AppEntryPointViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(slot_10["complete_label"], "")
         self.assertContains(response, "Completo")
         self.assertNotContains(response, response.context["selected_day_summary"])
+
+
+class AgendaSettingsViewTests(AuthenticatedAgendaBaseTestCase):
+    def test_settings_page_creates_singleton_and_renders_empty_states(self):
+        response = self.client.get(reverse("core:agenda_settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/agenda_settings.html")
+        self.assertContains(response, "Ajustes de agenda")
+        self.assertContains(response, "Calendario laboral minimo")
+        self.assertContains(response, "Sin cierres")
+        self.assertContains(response, "Sin festivos oficiales")
+        self.assertContains(response, "Importar festivos nacionales desde BOE")
+        self.assertContains(response, 'name="year"')
+        self.assertContains(response, reverse("core:manual_closure_create"))
+        self.assertContains(response, reverse("core:official_holiday_create"))
+        self.assertEqual(AgendaSettings.objects.count(), 1)
+
+    def test_settings_page_updates_global_singleton(self):
+        response = self.client.post(
+            reverse("core:agenda_settings"),
+            {
+                "saturdays_non_working": "on",
+            },
+        )
+
+        self.assertRedirects(response, reverse("core:agenda_settings"), fetch_redirect_response=False)
+        settings = AgendaSettings.get_solo()
+        self.assertTrue(settings.saturdays_non_working)
+        self.assertFalse(settings.sundays_non_working)
+
+    def test_settings_page_lists_existing_manual_closures_with_actions(self):
+        manual_closure = ManualClosure.objects.create(
+            start_date=date(2026, 4, 20),
+            end_date=date(2026, 4, 22),
+            reason_type=ManualClosure.ReasonType.VACATION,
+            label="Vacaciones de abril",
+            notes="Cierre completo",
+        )
+
+        response = self.client.get(reverse("core:agenda_settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Vacaciones de abril")
+        self.assertContains(response, "20/04/2026 a 22/04/2026")
+        self.assertContains(response, reverse("core:manual_closure_update", args=[manual_closure.pk]))
+        self.assertContains(response, reverse("core:manual_closure_delete", args=[manual_closure.pk]))
+
+    def test_settings_page_lists_existing_official_holidays_with_actions(self):
+        manual_holiday = OfficialHoliday.objects.create(
+            day=date(2026, 4, 22),
+            name="Vispera manual",
+        )
+        official_holiday = OfficialHoliday.objects.create(
+            day=date(2026, 4, 23),
+            name="San Jorge",
+            source=OfficialHoliday.Source.BOE_NATIONAL_SYNC,
+        )
+
+        response = self.client.get(reverse("core:agenda_settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Vispera manual")
+        self.assertContains(response, "Manual")
+        self.assertContains(response, "San Jorge")
+        self.assertContains(response, "23/04/2026")
+        self.assertContains(response, "Sync BOE nacional")
+        self.assertContains(response, reverse("core:official_holiday_update", args=[manual_holiday.pk]))
+        self.assertContains(response, reverse("core:official_holiday_update", args=[official_holiday.pk]))
+        self.assertContains(response, reverse("core:official_holiday_delete", args=[official_holiday.pk]))
+
+    @patch("core.views.import_boe_national_holidays")
+    def test_settings_page_can_launch_manual_boe_sync_and_show_summary(self, mocked_import):
+        mocked_import.return_value = OfficialHolidaySyncResult(
+            target_year=2026,
+            resolution=BoeHolidayResolution(
+                identifier="BOE-A-2025-21667",
+                title=(
+                    "Resolución de 17 de octubre de 2025, de la Dirección General de Trabajo, "
+                    "por la que se publica la relación de fiestas laborales para el año 2026."
+                ),
+                url_html="https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-21667",
+            ),
+            created_count=8,
+            skipped_existing_count=1,
+            error_count=0,
+        )
+
+        response = self.client.post(
+            reverse("core:agenda_settings"),
+            {
+                "agenda_action": "sync_official_holidays",
+                "year": "2026",
+            },
+            follow=True,
+        )
+
+        mocked_import.assert_called_once_with(2026)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Importacion BOE 2026 completada.")
+        self.assertContains(response, "Creados: 8.")
+        self.assertContains(response, "Ignorados existentes: 1.")
+        self.assertContains(response, "Errores: 0.")
+
+    @patch("core.views.import_boe_national_holidays")
+    def test_settings_page_surfaces_sync_error_message(self, mocked_import):
+        mocked_import.side_effect = BoeSyncError("No se ha encontrado la resolución en el BOE.")
+
+        response = self.client.post(
+            reverse("core:agenda_settings"),
+            {
+                "agenda_action": "sync_official_holidays",
+                "year": "2026",
+            },
+            follow=True,
+        )
+
+        mocked_import.assert_called_once_with(2026)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No se pudo completar la importacion BOE 2026")
+        self.assertContains(response, "No se ha encontrado la resolución en el BOE.")
+
+    def test_settings_page_surfaces_sync_form_validation_errors(self):
+        response = self.client.post(
+            reverse("core:agenda_settings"),
+            {
+                "agenda_action": "sync_official_holidays",
+                "year": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("year", response.context["sync_form"].errors)
+
+
+class ManualClosureViewTests(AuthenticatedAgendaBaseTestCase):
+    def test_create_view_renders_form(self):
+        response = self.client.get(reverse("core:manual_closure_create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/manual_closure_form.html")
+        self.assertContains(response, "Nuevo cierre manual")
+        self.assertContains(response, "Fecha inicial")
+
+    def test_create_view_creates_manual_closure_and_redirects_to_settings(self):
+        response = self.client.post(
+            reverse("core:manual_closure_create"),
+            {
+                "start_date": "2026-04-20",
+                "end_date": "2026-04-22",
+                "reason_type": ManualClosure.ReasonType.VACATION,
+                "label": "Vacaciones de abril",
+                "notes": "Semana cerrada",
+            },
+        )
+
+        self.assertRedirects(response, reverse("core:agenda_settings"), fetch_redirect_response=False)
+        self.assertTrue(
+            ManualClosure.objects.filter(
+                start_date=date(2026, 4, 20),
+                end_date=date(2026, 4, 22),
+                label="Vacaciones de abril",
+            ).exists()
+        )
+
+    def test_create_view_surfaces_model_validation_errors(self):
+        ManualClosure.objects.create(
+            start_date=date(2026, 4, 14),
+            end_date=date(2026, 4, 16),
+            reason_type=ManualClosure.ReasonType.BUSINESS_CLOSURE,
+        )
+
+        response = self.client.post(
+            reverse("core:manual_closure_create"),
+            {
+                "start_date": "2026-04-16",
+                "end_date": "2026-04-18",
+                "reason_type": ManualClosure.ReasonType.OTHER,
+                "label": "Otro cierre",
+                "notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "solapa")
+        self.assertEqual(ManualClosure.objects.count(), 1)
+
+    def test_update_view_updates_manual_closure(self):
+        manual_closure = ManualClosure.objects.create(
+            start_date=date(2026, 4, 20),
+            end_date=date(2026, 4, 22),
+            reason_type=ManualClosure.ReasonType.VACATION,
+            label="Vacaciones de abril",
+        )
+
+        response = self.client.post(
+            reverse("core:manual_closure_update", args=[manual_closure.pk]),
+            {
+                "start_date": "2026-04-20",
+                "end_date": "2026-04-23",
+                "reason_type": ManualClosure.ReasonType.BUSINESS_CLOSURE,
+                "label": "Cierre de semana",
+                "notes": "Actualizado",
+            },
+        )
+
+        self.assertRedirects(response, reverse("core:agenda_settings"), fetch_redirect_response=False)
+        manual_closure.refresh_from_db()
+        self.assertEqual(manual_closure.end_date, date(2026, 4, 23))
+        self.assertEqual(manual_closure.reason_type, ManualClosure.ReasonType.BUSINESS_CLOSURE)
+        self.assertEqual(manual_closure.label, "Cierre de semana")
+        self.assertEqual(manual_closure.notes, "Actualizado")
+
+    def test_delete_view_confirms_and_deletes_manual_closure(self):
+        manual_closure = ManualClosure.objects.create(
+            start_date=date(2026, 4, 20),
+            end_date=date(2026, 4, 20),
+            reason_type=ManualClosure.ReasonType.PERSONAL,
+            label="Asunto personal",
+        )
+
+        get_response = self.client.get(reverse("core:manual_closure_delete", args=[manual_closure.pk]))
+        self.assertEqual(get_response.status_code, 200)
+        self.assertTemplateUsed(get_response, "core/manual_closure_confirm_delete.html")
+        self.assertContains(get_response, "Confirmar eliminacion")
+
+        post_response = self.client.post(reverse("core:manual_closure_delete", args=[manual_closure.pk]))
+        self.assertRedirects(post_response, reverse("core:agenda_settings"), fetch_redirect_response=False)
+        self.assertFalse(ManualClosure.objects.filter(pk=manual_closure.pk).exists())
+
+
+class OfficialHolidayViewTests(AuthenticatedAgendaBaseTestCase):
+    def test_create_view_renders_form(self):
+        response = self.client.get(reverse("core:official_holiday_create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/official_holiday_form.html")
+        self.assertContains(response, "Nuevo festivo oficial")
+        self.assertContains(response, "Nombre visible")
+
+    def test_create_view_creates_official_holiday_and_redirects_to_settings(self):
+        response = self.client.post(
+            reverse("core:official_holiday_create"),
+            {
+                "day": "2026-04-23",
+                "name": "San Jorge",
+            },
+        )
+
+        self.assertRedirects(response, reverse("core:agenda_settings"), fetch_redirect_response=False)
+        self.assertTrue(
+            OfficialHoliday.objects.filter(
+                day=date(2026, 4, 23),
+                name="San Jorge",
+            ).exists()
+        )
+
+    def test_create_view_surfaces_unique_day_validation(self):
+        OfficialHoliday.objects.create(day=date(2026, 4, 23), name="San Jorge")
+
+        response = self.client.post(
+            reverse("core:official_holiday_create"),
+            {
+                "day": "2026-04-23",
+                "name": "Otro festivo",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("day", response.context["form"].errors)
+        self.assertEqual(OfficialHoliday.objects.count(), 1)
+
+    def test_update_view_updates_official_holiday(self):
+        official_holiday = OfficialHoliday.objects.create(
+            day=date(2026, 4, 23),
+            name="San Jorge",
+        )
+
+        response = self.client.post(
+            reverse("core:official_holiday_update", args=[official_holiday.pk]),
+            {
+                "day": "2026-04-24",
+                "name": "Festivo local",
+            },
+        )
+
+        self.assertRedirects(response, reverse("core:agenda_settings"), fetch_redirect_response=False)
+        official_holiday.refresh_from_db()
+        self.assertEqual(official_holiday.day, date(2026, 4, 24))
+        self.assertEqual(official_holiday.name, "Festivo local")
+
+    def test_delete_view_confirms_and_deletes_official_holiday(self):
+        official_holiday = OfficialHoliday.objects.create(
+            day=date(2026, 4, 23),
+            name="San Jorge",
+        )
+
+        get_response = self.client.get(reverse("core:official_holiday_delete", args=[official_holiday.pk]))
+        self.assertEqual(get_response.status_code, 200)
+        self.assertTemplateUsed(get_response, "core/official_holiday_confirm_delete.html")
+        self.assertContains(get_response, "Confirmar eliminacion")
+
+        post_response = self.client.post(reverse("core:official_holiday_delete", args=[official_holiday.pk]))
+        self.assertRedirects(post_response, reverse("core:agenda_settings"), fetch_redirect_response=False)
+        self.assertFalse(OfficialHoliday.objects.filter(pk=official_holiday.pk).exists())
+
+
+class OfficialHolidaySyncCommandTests(TestCase):
+    def _resolution(self, year=2026):
+        return BoeHolidayResolution(
+            identifier=f"BOE-A-{year - 1}-21667",
+            title=(
+                f"Resolución de 17 de octubre de {year - 1}, de la Dirección General de Trabajo,"
+                f" por la que se publica la relación de fiestas laborales para el año {year}."
+            ),
+            url_html=f"https://www.boe.es/diario_boe/txt.php?id=BOE-A-{year - 1}-21667",
+        )
+
+    def test_command_imports_new_holidays_with_boe_source(self):
+        stdout = StringIO()
+
+        with patch(
+            "core.management.commands.sync_official_holidays.BoeNationalHolidaySyncService.fetch_national_holidays",
+            return_value=(
+                self._resolution(),
+                [
+                    OfficialHolidayImport(day=date(2026, 1, 1), name="Año Nuevo"),
+                    OfficialHolidayImport(day=date(2026, 4, 3), name="Viernes Santo"),
+                ],
+            ),
+        ):
+            call_command("sync_official_holidays", "--year", "2026", stdout=stdout)
+
+        self.assertEqual(OfficialHoliday.objects.count(), 2)
+        self.assertTrue(
+            OfficialHoliday.objects.filter(
+                day=date(2026, 1, 1),
+                name="Año Nuevo",
+                source=OfficialHoliday.Source.BOE_NATIONAL_SYNC,
+            ).exists()
+        )
+        self.assertIn("creados=2", stdout.getvalue())
+        self.assertIn("ignorados_existentes=0", stdout.getvalue())
+
+    def test_command_ignores_existing_manual_holiday_without_overwriting_it(self):
+        manual_holiday = OfficialHoliday.objects.create(
+            day=date(2026, 1, 1),
+            name="Nombre manual",
+        )
+        stdout = StringIO()
+
+        with patch(
+            "core.management.commands.sync_official_holidays.BoeNationalHolidaySyncService.fetch_national_holidays",
+            return_value=(
+                self._resolution(),
+                [
+                    OfficialHolidayImport(day=date(2026, 1, 1), name="Año Nuevo"),
+                    OfficialHolidayImport(day=date(2026, 4, 3), name="Viernes Santo"),
+                ],
+            ),
+        ):
+            call_command("sync_official_holidays", "--year", "2026", stdout=stdout)
+
+        manual_holiday.refresh_from_db()
+        self.assertEqual(manual_holiday.name, "Nombre manual")
+        self.assertEqual(manual_holiday.source, OfficialHoliday.Source.MANUAL)
+        self.assertEqual(OfficialHoliday.objects.count(), 2)
+        self.assertIn("creados=1", stdout.getvalue())
+        self.assertIn("ignorados_existentes=1", stdout.getvalue())
+
+    def test_command_does_not_duplicate_existing_synced_holiday(self):
+        OfficialHoliday.objects.create(
+            day=date(2026, 1, 1),
+            name="Año Nuevo",
+            source=OfficialHoliday.Source.BOE_NATIONAL_SYNC,
+        )
+        stdout = StringIO()
+
+        with patch(
+            "core.management.commands.sync_official_holidays.BoeNationalHolidaySyncService.fetch_national_holidays",
+            return_value=(
+                self._resolution(),
+                [
+                    OfficialHolidayImport(day=date(2026, 1, 1), name="Año Nuevo"),
+                ],
+            ),
+        ):
+            call_command("sync_official_holidays", "--year", "2026", stdout=stdout)
+
+        self.assertEqual(OfficialHoliday.objects.count(), 1)
+        self.assertIn("creados=0", stdout.getvalue())
+        self.assertIn("ignorados_existentes=1", stdout.getvalue())
+
+    def test_command_raises_clear_error_when_boe_lookup_fails(self):
+        with patch(
+            "core.management.commands.sync_official_holidays.BoeNationalHolidaySyncService.fetch_national_holidays",
+            side_effect=BoeSyncError("No se ha encontrado la resolución en el BOE."),
+        ):
+            with self.assertRaises(CommandError) as raised:
+                call_command("sync_official_holidays", "--year", "2026")
+
+        self.assertIn("No se ha encontrado la resolución", str(raised.exception))

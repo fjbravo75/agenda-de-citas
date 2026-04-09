@@ -11,7 +11,6 @@ from .models import (
     Appointment,
     Client,
     ManualClosure,
-    OfficialHoliday,
     Service,
     agenda_slot_operational_state_map,
 )
@@ -83,22 +82,6 @@ class ManualClosureForm(forms.ModelForm):
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
             "notes": forms.Textarea(attrs={"rows": 4}),
-        }
-
-
-class OfficialHolidayForm(forms.ModelForm):
-    class Meta:
-        model = OfficialHoliday
-        fields = ("day", "name")
-        labels = {
-            "day": "Fecha",
-            "name": "Nombre visible",
-        }
-        help_texts = {
-            "name": "Usa un nombre corto y reconocible para identificar el festivo en la agenda.",
-        }
-        widgets = {
-            "day": forms.DateInput(attrs={"type": "date"}),
         }
 
 

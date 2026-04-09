@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management import CommandError, call_command
 from django.test import TestCase
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
 from .management.commands.sync_official_holidays import (
@@ -17,7 +17,7 @@ from .management.commands.sync_official_holidays import (
     OfficialHolidayImport,
     OfficialHolidaySyncResult,
 )
-from .forms import AgendaSettingsForm, ManualClosureForm, OfficialHolidayForm, OfficialHolidaySyncForm
+from .forms import AgendaSettingsForm, ManualClosureForm, OfficialHolidaySyncForm
 from .day_availability import DayAvailabilityResolver
 from .models import (
     AgendaSettings,
@@ -724,21 +724,6 @@ class ManualClosureFormTests(TestCase):
         self.assertIn("solapa", str(form.non_field_errors()))
 
 
-class OfficialHolidayFormTests(TestCase):
-    def test_form_surfaces_unique_day_validation(self):
-        OfficialHoliday.objects.create(day=date(2026, 4, 23), name="San Jorge")
-
-        form = OfficialHolidayForm(
-            data={
-                "day": "2026-04-23",
-                "name": "Otro festivo",
-            }
-        )
-
-        self.assertFalse(form.is_valid())
-        self.assertIn("day", form.errors)
-
-
 class OfficialHolidaySyncFormTests(TestCase):
     def test_form_requires_a_valid_year(self):
         form = OfficialHolidaySyncForm(data={"year": ""})
@@ -877,35 +862,6 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
             reason_type=ManualClosure.ReasonType.OTHER,
         )
         requested_url = reverse("core:manual_closure_delete", args=[manual_closure.pk])
-
-        response = self.client.get(requested_url)
-
-        self._assert_redirects_to_login(response, requested_url)
-
-    def test_official_holiday_create_redirects_anonymous_user_to_wagtail_login(self):
-        requested_url = reverse("core:official_holiday_create")
-
-        response = self.client.get(requested_url)
-
-        self._assert_redirects_to_login(response, requested_url)
-
-    def test_official_holiday_update_redirects_anonymous_user_to_wagtail_login(self):
-        official_holiday = OfficialHoliday.objects.create(
-            day=timezone.localdate(),
-            name="San Jorge",
-        )
-        requested_url = reverse("core:official_holiday_update", args=[official_holiday.pk])
-
-        response = self.client.get(requested_url)
-
-        self._assert_redirects_to_login(response, requested_url)
-
-    def test_official_holiday_delete_redirects_anonymous_user_to_wagtail_login(self):
-        official_holiday = OfficialHoliday.objects.create(
-            day=timezone.localdate(),
-            name="San Jorge",
-        )
-        requested_url = reverse("core:official_holiday_delete", args=[official_holiday.pk])
 
         response = self.client.get(requested_url)
 
@@ -2984,7 +2940,7 @@ class AgendaSettingsViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertContains(response, "Todavia no hay un fallo de sync BOE registrado en esta agenda.")
         self.assertNotContains(response, "Limpiar ultimo fallo")
         self.assertNotContains(response, "Crear festivo")
-        self.assertNotContains(response, reverse("core:official_holiday_create"))
+        self.assertNotContains(response, "/app/settings/agenda/official-holidays/")
         self.assertContains(response, 'name="year"')
         self.assertContains(response, reverse("core:manual_closure_create"))
         self.assertEqual(AgendaSettings.objects.count(), 1)
@@ -3063,11 +3019,32 @@ class AgendaSettingsViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertContains(response, "San Jorge")
         self.assertContains(response, "23/04/2026")
         self.assertContains(response, "Sync BOE nacional")
-        self.assertNotContains(response, reverse("core:official_holiday_update", args=[manual_holiday.pk]))
-        self.assertNotContains(response, reverse("core:official_holiday_delete", args=[manual_holiday.pk]))
-        self.assertNotContains(response, reverse("core:official_holiday_update", args=[official_holiday.pk]))
-        self.assertNotContains(response, reverse("core:official_holiday_delete", args=[official_holiday.pk]))
+        self.assertNotContains(response, "/app/settings/agenda/official-holidays/")
         self.assertContains(response, "<th>Acciones</th>", count=1, html=True)
+
+    def test_removed_manual_official_holiday_named_urls_are_not_registered(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse("core:official_holiday_create")
+        with self.assertRaises(NoReverseMatch):
+            reverse("core:official_holiday_update", args=[1])
+        with self.assertRaises(NoReverseMatch):
+            reverse("core:official_holiday_delete", args=[1])
+
+    def test_removed_manual_official_holiday_paths_return_404(self):
+        official_holiday = OfficialHoliday.objects.create(day=date(2026, 4, 23), name="San Jorge")
+
+        request_specs = [
+            ("get", "/app/settings/agenda/official-holidays/new/", {}),
+            ("post", "/app/settings/agenda/official-holidays/new/", {"day": "2026-04-24", "name": "Festivo"}),
+            ("get", f"/app/settings/agenda/official-holidays/{official_holiday.pk}/edit/", {}),
+            ("post", f"/app/settings/agenda/official-holidays/{official_holiday.pk}/edit/", {"day": "2026-04-24"}),
+            ("get", f"/app/settings/agenda/official-holidays/{official_holiday.pk}/delete/", {}),
+            ("post", f"/app/settings/agenda/official-holidays/{official_holiday.pk}/delete/", {}),
+        ]
+
+        for method_name, path, payload in request_specs:
+            response = getattr(self.client, method_name)(path, payload)
+            self.assertEqual(response.status_code, 404)
 
     @patch("core.views.import_boe_national_holidays")
     @patch("core.views.timezone.now")
@@ -3367,140 +3344,6 @@ class ManualClosureViewTests(AuthenticatedAgendaBaseTestCase):
         post_response = self.client.post(reverse("core:manual_closure_delete", args=[manual_closure.pk]))
         self.assertRedirects(post_response, reverse("core:agenda_settings"), fetch_redirect_response=False)
         self.assertFalse(ManualClosure.objects.filter(pk=manual_closure.pk).exists())
-
-
-class OfficialHolidayViewTests(AuthenticatedAgendaBaseTestCase):
-    def test_create_view_renders_form(self):
-        response = self.client.get(reverse("core:official_holiday_create"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "core/official_holiday_form.html")
-        self.assertContains(response, "Nuevo festivo oficial")
-        self.assertContains(response, "Nombre visible")
-
-    def test_create_view_creates_official_holiday_and_redirects_to_settings(self):
-        response = self.client.post(
-            reverse("core:official_holiday_create"),
-            {
-                "day": "2026-04-23",
-                "name": "San Jorge",
-            },
-        )
-
-        self.assertRedirects(response, reverse("core:agenda_settings"), fetch_redirect_response=False)
-        self.assertTrue(
-            OfficialHoliday.objects.filter(
-                day=date(2026, 4, 23),
-                name="San Jorge",
-            ).exists()
-        )
-
-    def test_create_view_surfaces_unique_day_validation(self):
-        OfficialHoliday.objects.create(day=date(2026, 4, 23), name="San Jorge")
-
-        response = self.client.post(
-            reverse("core:official_holiday_create"),
-            {
-                "day": "2026-04-23",
-                "name": "Otro festivo",
-            },
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("day", response.context["form"].errors)
-        self.assertEqual(OfficialHoliday.objects.count(), 1)
-
-    def test_update_view_updates_manual_official_holiday(self):
-        official_holiday = OfficialHoliday.objects.create(
-            day=date(2026, 4, 23),
-            name="San Jorge",
-        )
-
-        response = self.client.post(
-            reverse("core:official_holiday_update", args=[official_holiday.pk]),
-            {
-                "day": "2026-04-24",
-                "name": "Festivo local",
-            },
-        )
-
-        self.assertRedirects(response, reverse("core:agenda_settings"), fetch_redirect_response=False)
-        official_holiday.refresh_from_db()
-        self.assertEqual(official_holiday.day, date(2026, 4, 24))
-        self.assertEqual(official_holiday.name, "Festivo local")
-
-    def test_update_view_blocks_boe_holiday_access_and_preserves_record(self):
-        official_holiday = OfficialHoliday.objects.create(
-            day=date(2026, 4, 23),
-            name="San Jorge",
-            source=OfficialHoliday.Source.BOE_NATIONAL_SYNC,
-        )
-
-        get_response = self.client.get(
-            reverse("core:official_holiday_update", args=[official_holiday.pk]),
-            follow=True,
-        )
-
-        self.assertEqual(get_response.status_code, 200)
-        self.assertRedirects(get_response, reverse("core:agenda_settings"))
-        self.assertContains(get_response, "Los festivos sincronizados desde BOE no se editan manualmente.")
-
-        post_response = self.client.post(
-            reverse("core:official_holiday_update", args=[official_holiday.pk]),
-            {
-                "day": "2026-04-24",
-                "name": "Cambio manual",
-            },
-            follow=True,
-        )
-
-        self.assertEqual(post_response.status_code, 200)
-        self.assertRedirects(post_response, reverse("core:agenda_settings"))
-        self.assertContains(post_response, "Los festivos sincronizados desde BOE no se editan manualmente.")
-        official_holiday.refresh_from_db()
-        self.assertEqual(official_holiday.day, date(2026, 4, 23))
-        self.assertEqual(official_holiday.name, "San Jorge")
-
-    def test_delete_view_confirms_and_deletes_manual_official_holiday(self):
-        official_holiday = OfficialHoliday.objects.create(
-            day=date(2026, 4, 23),
-            name="San Jorge",
-        )
-
-        get_response = self.client.get(reverse("core:official_holiday_delete", args=[official_holiday.pk]))
-        self.assertEqual(get_response.status_code, 200)
-        self.assertTemplateUsed(get_response, "core/official_holiday_confirm_delete.html")
-        self.assertContains(get_response, "Confirmar eliminacion")
-
-        post_response = self.client.post(reverse("core:official_holiday_delete", args=[official_holiday.pk]))
-        self.assertRedirects(post_response, reverse("core:agenda_settings"), fetch_redirect_response=False)
-        self.assertFalse(OfficialHoliday.objects.filter(pk=official_holiday.pk).exists())
-
-    def test_delete_view_blocks_boe_holiday_access_and_preserves_record(self):
-        official_holiday = OfficialHoliday.objects.create(
-            day=date(2026, 4, 23),
-            name="San Jorge",
-            source=OfficialHoliday.Source.BOE_NATIONAL_SYNC,
-        )
-
-        get_response = self.client.get(
-            reverse("core:official_holiday_delete", args=[official_holiday.pk]),
-            follow=True,
-        )
-
-        self.assertEqual(get_response.status_code, 200)
-        self.assertRedirects(get_response, reverse("core:agenda_settings"))
-        self.assertContains(get_response, "Los festivos sincronizados desde BOE no se eliminan manualmente.")
-
-        post_response = self.client.post(
-            reverse("core:official_holiday_delete", args=[official_holiday.pk]),
-            follow=True,
-        )
-
-        self.assertEqual(post_response.status_code, 200)
-        self.assertRedirects(post_response, reverse("core:agenda_settings"))
-        self.assertContains(post_response, "Los festivos sincronizados desde BOE no se eliminan manualmente.")
-        self.assertTrue(OfficialHoliday.objects.filter(pk=official_holiday.pk).exists())
 
 
 class OfficialHolidaySyncCommandTests(TestCase):

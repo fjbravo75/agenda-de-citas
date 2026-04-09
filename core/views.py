@@ -22,7 +22,6 @@ from .forms import (
     AppointmentForm,
     ClientForm,
     ManualClosureForm,
-    OfficialHolidayForm,
     OfficialHolidaySyncForm,
 )
 from .management.commands.sync_official_holidays import BoeSyncError, import_boe_national_holidays
@@ -1280,103 +1279,6 @@ class ManualClosureDeleteView(AppLoginRequiredMixin, TemplateView):
 
     def post(self, request, *args, **kwargs):
         self.get_manual_closure().delete()
-        return HttpResponseRedirect(_agenda_settings_url())
-
-
-class OfficialHolidayFormViewBase(AppLoginRequiredMixin, FormView):
-    template_name = "core/official_holiday_form.html"
-    form_class = OfficialHolidayForm
-    boe_sync_guard_message = (
-        "Los festivos sincronizados desde BOE no se editan manualmente. "
-        "Para cierres del negocio usa Cierres manuales."
-    )
-
-    def get_official_holiday(self):
-        return None
-
-    def _is_boe_synced_holiday(self, official_holiday):
-        return official_holiday is not None and official_holiday.source == OfficialHoliday.Source.BOE_NATIONAL_SYNC
-
-    def _redirect_boe_synced_holiday(self):
-        messages.error(self.request, self.boe_sync_guard_message)
-        return HttpResponseRedirect(_agenda_settings_url())
-
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        kwargs["instance"] = self.get_official_holiday()
-        return kwargs
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        official_holiday = self.get_official_holiday()
-        is_edit = official_holiday is not None
-        context.update(
-            {
-                "page_title": "Editar festivo oficial" if is_edit else "Nuevo festivo oficial",
-                "page_description": (
-                    "Marca una fecha oficial no operativa para que la agenda la trate como dia cerrado."
-                ),
-                "submit_label": "Guardar cambios" if is_edit else "Guardar festivo",
-                "back_url": _agenda_settings_url(),
-                "is_edit": is_edit,
-            }
-        )
-        return context
-
-    def form_valid(self, form):
-        form.save()
-        return HttpResponseRedirect(_agenda_settings_url())
-
-
-class OfficialHolidayCreateView(OfficialHolidayFormViewBase):
-    pass
-
-
-class OfficialHolidayUpdateView(OfficialHolidayFormViewBase):
-    def get_official_holiday(self):
-        if not hasattr(self, "_official_holiday"):
-            self._official_holiday = get_object_or_404(OfficialHoliday, pk=self.kwargs["pk"])
-        return self._official_holiday
-
-    def dispatch(self, request, *args, **kwargs):
-        if self._is_boe_synced_holiday(self.get_official_holiday()):
-            return self._redirect_boe_synced_holiday()
-        return super().dispatch(request, *args, **kwargs)
-
-
-class OfficialHolidayDeleteView(AppLoginRequiredMixin, TemplateView):
-    template_name = "core/official_holiday_confirm_delete.html"
-    boe_sync_guard_message = (
-        "Los festivos sincronizados desde BOE no se eliminan manualmente. "
-        "Para cierres del negocio usa Cierres manuales."
-    )
-
-    def get_official_holiday(self):
-        if not hasattr(self, "_official_holiday"):
-            self._official_holiday = get_object_or_404(OfficialHoliday, pk=self.kwargs["pk"])
-        return self._official_holiday
-
-    def dispatch(self, request, *args, **kwargs):
-        if self.get_official_holiday().source == OfficialHoliday.Source.BOE_NATIONAL_SYNC:
-            messages.error(request, self.boe_sync_guard_message)
-            return HttpResponseRedirect(_agenda_settings_url())
-        return super().dispatch(request, *args, **kwargs)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        official_holiday = self.get_official_holiday()
-        context.update(
-            {
-                "page_title": "Eliminar festivo oficial",
-                "page_description": "Confirma si quieres retirar este festivo oficial de la agenda.",
-                "official_holiday": official_holiday,
-                "back_url": _agenda_settings_url(),
-            }
-        )
-        return context
-
-    def post(self, request, *args, **kwargs):
-        self.get_official_holiday().delete()
         return HttpResponseRedirect(_agenda_settings_url())
 
 

@@ -13,9 +13,6 @@ from .views import (
     ManualClosureCreateView,
     ManualClosureDeleteView,
     ManualClosureUpdateView,
-    OfficialHolidayCreateView,
-    OfficialHolidayDeleteView,
-    OfficialHolidayUpdateView,
     UIValidationView,
 )
 
@@ -40,21 +37,6 @@ urlpatterns = [
         "settings/agenda/closures/<int:pk>/delete/",
         ManualClosureDeleteView.as_view(),
         name="manual_closure_delete",
-    ),
-    path(
-        "settings/agenda/official-holidays/new/",
-        OfficialHolidayCreateView.as_view(),
-        name="official_holiday_create",
-    ),
-    path(
-        "settings/agenda/official-holidays/<int:pk>/edit/",
-        OfficialHolidayUpdateView.as_view(),
-        name="official_holiday_update",
-    ),
-    path(
-        "settings/agenda/official-holidays/<int:pk>/delete/",
-        OfficialHolidayDeleteView.as_view(),
-        name="official_holiday_delete",
     ),
     path("availability-blocks/toggle/", AvailabilityBlockToggleView.as_view(), name="availability_block_toggle"),
     path("appointments/new/", AppointmentCreateView.as_view(), name="appointment_create"),

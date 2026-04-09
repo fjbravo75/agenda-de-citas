@@ -491,6 +491,11 @@ def _build_day_panel(selected_day, return_url="", agenda_settings=None):
         "selected_day_status_notes": (
             day_availability.manual_closure.notes if day_availability.manual_closure else ""
         ),
+        "selected_day_secondary_notice": (
+            f"Es {day_availability.official_holiday.name}, pero la agenda esta abierta."
+            if day_availability.is_working_day and day_availability.official_holiday is not None
+            else ""
+        ),
         "agenda_timeline_slots": timeline_slots,
     }
 
@@ -614,13 +619,6 @@ def _build_markers_for_day(target_day, visible_month_date, month_summary):
     day_is_closed = _is_closed_day(day_availability)
 
     markers = []
-    if day_is_closed:
-        markers.append(
-            {
-                "label": day_availability.label,
-                "kind": _day_status_kind(day_availability),
-            }
-        )
     if active_entries:
         markers.append(
             {
@@ -645,6 +643,47 @@ def _build_markers_for_day(target_day, visible_month_date, month_summary):
     return markers[:2]
 
 
+def _build_month_primary_state(day_availability):
+    if day_availability is None or day_availability.is_working_day:
+        return None
+
+    if day_availability.status == DayAvailabilityResolver.NON_WORKING_SATURDAY:
+        return {
+            "kind": "non-working",
+            "lines": ["Sábado", "no laborable"],
+        }
+
+    if day_availability.status == DayAvailabilityResolver.NON_WORKING_SUNDAY:
+        return {
+            "kind": "non-working",
+            "lines": ["Domingo", "no laborable"],
+        }
+
+    if day_availability.official_holiday is not None:
+        return {
+            "kind": "official-holiday",
+            "lines": [day_availability.official_holiday.name],
+        }
+
+    if day_availability.manual_closure is not None:
+        return {
+            "kind": "manual-closure",
+            "lines": [day_availability.label],
+        }
+
+    return {
+        "kind": "non-working",
+        "lines": [day_availability.label],
+    }
+
+
+def _month_day_status_kind(day_availability):
+    primary_state = _build_month_primary_state(day_availability)
+    if primary_state is None:
+        return ""
+    return primary_state["kind"]
+
+
 def _build_agenda_weeks(visible_year, visible_month, selected_day, real_today, month_summary):
     month_calendar = Calendar(firstweekday=0).monthdatescalendar(visible_year, visible_month)
     visible_month_date = date(visible_year, visible_month, 1)
@@ -654,16 +693,25 @@ def _build_agenda_weeks(visible_year, visible_month, selected_day, real_today, m
         for week_day in week:
             is_outside = week_day.month != visible_month or week_day.year != visible_year
             day_availability = month_summary.get(week_day, {}).get("day_availability")
-            day_status_kind = ""
-            if day_availability is not None and not day_availability.is_working_day:
-                day_status_kind = _day_status_kind(day_availability)
+            primary_state = _build_month_primary_state(day_availability)
+            day_status_kind = _month_day_status_kind(day_availability)
+            secondary_holiday_marker = ""
+            secondary_holiday_marker_title = ""
+            if primary_state is None and day_availability is not None and day_availability.official_holiday is not None:
+                secondary_holiday_marker = day_availability.official_holiday.name
+                secondary_holiday_marker_title = (
+                    f"{day_availability.official_holiday.name}. La agenda esta abierta."
+                )
             week_days.append(
                 {
                     "number": week_day.day,
                     "outside": is_outside,
                     "today": week_day == real_today and not is_outside,
                     "selected": week_day == selected_day,
+                    "primary_state": primary_state,
                     "markers": _build_markers_for_day(week_day, visible_month_date, month_summary),
+                    "secondary_holiday_marker": secondary_holiday_marker,
+                    "secondary_holiday_marker_title": secondary_holiday_marker_title,
                     "status_kind": day_status_kind,
                     "year": week_day.year,
                     "month": week_day.month,
@@ -750,6 +798,7 @@ class AgendaSettingsView(AppLoginRequiredMixin, FormView):
     form_class = AgendaSettingsForm
     SETTINGS_ACTION = "update_settings"
     SYNC_OFFICIAL_HOLIDAYS_ACTION = "sync_official_holidays"
+    CLEAR_SYNC_FAILURE_ACTION = "clear_sync_failure"
 
     def get_settings(self):
         return AgendaSettings.get_solo()
@@ -772,7 +821,32 @@ class AgendaSettingsView(AppLoginRequiredMixin, FormView):
         return ManualClosure.objects.all()
 
     def get_official_holidays(self):
-        return OfficialHoliday.objects.all()
+        return OfficialHoliday.objects.filter(source=OfficialHoliday.Source.BOE_NATIONAL_SYNC)
+
+    def get_last_boe_sync_trace(self, agenda_settings):
+        if not agenda_settings.has_boe_sync_trace:
+            return None
+
+        return {
+            "synced_at": agenda_settings.last_boe_sync_at,
+            "year": agenda_settings.last_boe_sync_year,
+            "resolution_identifier": agenda_settings.last_boe_sync_resolution_identifier,
+            "resolution_title": agenda_settings.last_boe_sync_resolution_title,
+            "resolution_url": agenda_settings.last_boe_sync_resolution_url,
+            "created_count": agenda_settings.last_boe_sync_created_count,
+            "skipped_existing_count": agenda_settings.last_boe_sync_skipped_existing_count,
+            "error_count": agenda_settings.last_boe_sync_error_count,
+        }
+
+    def get_last_boe_sync_failure_trace(self, agenda_settings):
+        if not agenda_settings.has_boe_sync_failure_trace:
+            return None
+
+        return {
+            "failed_at": agenda_settings.last_boe_sync_failure_at,
+            "year": agenda_settings.last_boe_sync_failure_year,
+            "message": agenda_settings.last_boe_sync_failure_message,
+        }
 
     def get(self, request, *args, **kwargs):
         return self.render_to_response(
@@ -787,12 +861,15 @@ class AgendaSettingsView(AppLoginRequiredMixin, FormView):
 
         if action == self.SYNC_OFFICIAL_HOLIDAYS_ACTION:
             return self._handle_sync_post()
+        if action == self.CLEAR_SYNC_FAILURE_ACTION:
+            return self._handle_clear_sync_failure_post()
         return self._handle_settings_post()
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context.setdefault("form", self.get_settings_form())
         context.setdefault("sync_form", self.get_sync_form())
+        agenda_settings = context["form"].instance
         context.update(
             {
                 "page_title": "Ajustes de agenda",
@@ -804,10 +881,60 @@ class AgendaSettingsView(AppLoginRequiredMixin, FormView):
                 "manual_closures": self.get_manual_closures(),
                 "manual_closure_create_url": reverse("core:manual_closure_create"),
                 "official_holidays": self.get_official_holidays(),
-                "official_holiday_create_url": reverse("core:official_holiday_create"),
+                "last_boe_sync_trace": self.get_last_boe_sync_trace(agenda_settings),
+                "last_boe_sync_failure_trace": self.get_last_boe_sync_failure_trace(agenda_settings),
             }
         )
         return context
+
+    def _store_sync_trace(self, result):
+        agenda_settings = self.get_settings()
+        agenda_settings.last_boe_sync_at = timezone.now()
+        agenda_settings.last_boe_sync_year = result.target_year
+        agenda_settings.last_boe_sync_resolution_identifier = result.resolution.identifier
+        agenda_settings.last_boe_sync_resolution_title = result.resolution.title
+        agenda_settings.last_boe_sync_resolution_url = result.resolution.url_html
+        agenda_settings.last_boe_sync_created_count = result.created_count
+        agenda_settings.last_boe_sync_skipped_existing_count = result.skipped_existing_count
+        agenda_settings.last_boe_sync_error_count = result.error_count
+        agenda_settings.save(
+            update_fields=[
+                "last_boe_sync_at",
+                "last_boe_sync_year",
+                "last_boe_sync_resolution_identifier",
+                "last_boe_sync_resolution_title",
+                "last_boe_sync_resolution_url",
+                "last_boe_sync_created_count",
+                "last_boe_sync_skipped_existing_count",
+                "last_boe_sync_error_count",
+            ]
+        )
+
+    def _store_sync_failure_trace(self, target_year, error_message):
+        agenda_settings = self.get_settings()
+        agenda_settings.last_boe_sync_failure_at = timezone.now()
+        agenda_settings.last_boe_sync_failure_year = target_year
+        agenda_settings.last_boe_sync_failure_message = error_message or "Error desconocido durante el sync BOE."
+        agenda_settings.save(
+            update_fields=[
+                "last_boe_sync_failure_at",
+                "last_boe_sync_failure_year",
+                "last_boe_sync_failure_message",
+            ]
+        )
+
+    def _clear_sync_failure_trace(self):
+        agenda_settings = self.get_settings()
+        agenda_settings.last_boe_sync_failure_at = None
+        agenda_settings.last_boe_sync_failure_year = None
+        agenda_settings.last_boe_sync_failure_message = ""
+        agenda_settings.save(
+            update_fields=[
+                "last_boe_sync_failure_at",
+                "last_boe_sync_failure_year",
+                "last_boe_sync_failure_message",
+            ]
+        )
 
     def _handle_settings_post(self):
         form = self.get_settings_form(data=self.request.POST)
@@ -837,17 +964,27 @@ class AgendaSettingsView(AppLoginRequiredMixin, FormView):
         try:
             result = import_boe_national_holidays(target_year)
         except (requests.RequestException, BoeSyncError) as error:
-            messages.error(self.request, f"No se pudo completar la importacion BOE {target_year}: {error}")
+            error_message = str(error)
+            self._store_sync_failure_trace(target_year, error_message)
+            messages.error(self.request, f"No se pudo completar la importacion BOE {target_year}: {error_message}")
         else:
+            self._store_sync_trace(result)
             messages.success(
                 self.request,
                 (
                     f"Importacion BOE {target_year} completada. "
                     f"Creados: {result.created_count}. "
                     f"Ignorados existentes: {result.skipped_existing_count}. "
+                    f"Reconciliados: {result.reconciled_count}. "
                     f"Errores: {result.error_count}."
                 ),
             )
+        return HttpResponseRedirect(_agenda_settings_url())
+
+    def _handle_clear_sync_failure_post(self):
+        if self.get_settings().has_boe_sync_failure_trace:
+            self._clear_sync_failure_trace()
+            messages.success(self.request, "Traza del ultimo fallo BOE limpiada.")
         return HttpResponseRedirect(_agenda_settings_url())
 
 
@@ -1149,9 +1286,20 @@ class ManualClosureDeleteView(AppLoginRequiredMixin, TemplateView):
 class OfficialHolidayFormViewBase(AppLoginRequiredMixin, FormView):
     template_name = "core/official_holiday_form.html"
     form_class = OfficialHolidayForm
+    boe_sync_guard_message = (
+        "Los festivos sincronizados desde BOE no se editan manualmente. "
+        "Para cierres del negocio usa Cierres manuales."
+    )
 
     def get_official_holiday(self):
         return None
+
+    def _is_boe_synced_holiday(self, official_holiday):
+        return official_holiday is not None and official_holiday.source == OfficialHoliday.Source.BOE_NATIONAL_SYNC
+
+    def _redirect_boe_synced_holiday(self):
+        messages.error(self.request, self.boe_sync_guard_message)
+        return HttpResponseRedirect(_agenda_settings_url())
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -1190,14 +1338,29 @@ class OfficialHolidayUpdateView(OfficialHolidayFormViewBase):
             self._official_holiday = get_object_or_404(OfficialHoliday, pk=self.kwargs["pk"])
         return self._official_holiday
 
+    def dispatch(self, request, *args, **kwargs):
+        if self._is_boe_synced_holiday(self.get_official_holiday()):
+            return self._redirect_boe_synced_holiday()
+        return super().dispatch(request, *args, **kwargs)
+
 
 class OfficialHolidayDeleteView(AppLoginRequiredMixin, TemplateView):
     template_name = "core/official_holiday_confirm_delete.html"
+    boe_sync_guard_message = (
+        "Los festivos sincronizados desde BOE no se eliminan manualmente. "
+        "Para cierres del negocio usa Cierres manuales."
+    )
 
     def get_official_holiday(self):
         if not hasattr(self, "_official_holiday"):
             self._official_holiday = get_object_or_404(OfficialHoliday, pk=self.kwargs["pk"])
         return self._official_holiday
+
+    def dispatch(self, request, *args, **kwargs):
+        if self.get_official_holiday().source == OfficialHoliday.Source.BOE_NATIONAL_SYNC:
+            messages.error(request, self.boe_sync_guard_message)
+            return HttpResponseRedirect(_agenda_settings_url())
+        return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)

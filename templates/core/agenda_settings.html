@@ -32,7 +32,7 @@
         <div class="stack-sm">
             <p class="eyebrow">Configuracion global</p>
             <h2>Reglas base de la agenda</h2>
-            <p class="text-secondary">La agenda ya parte de una parrilla fija de 8 tramos. Aqui solo decides si sabados y domingos abren o no esa base.</p>
+            <p class="text-secondary">La agenda ya parte de una parrilla fija de 8 tramos. Aqui decides si sabados, domingos y festivos oficiales bloquean o no la operativa base.</p>
         </div>
 
         <form method="post" class="section-stack">
@@ -85,7 +85,7 @@
             <div class="page-header__copy">
                 <p class="eyebrow">Cierres manuales</p>
                 <h2>Agenda cerrada por dias completos</h2>
-                <p class="text-secondary">Gestiona cierres de un dia o de un rango completo sin usar bloqueos por tramo.</p>
+                <p class="text-secondary">Gestiona cierres de un dia o de un rango completo por vacaciones, fiesta local, puente o cualquier otra necesidad del negocio.</p>
             </div>
             <div class="page-actions">
                 <a class="button button--secondary" href="{{ manual_closure_create_url }}">Crear cierre</a>
@@ -144,10 +144,7 @@
             <div class="page-header__copy">
                 <p class="eyebrow">Festivos oficiales</p>
                 <h2>Dias oficiales no operativos</h2>
-                <p class="text-secondary">Gestiona manualmente las fechas oficiales que deben cerrar la agenda y completalas si hace falta con la importacion manual de BOE.</p>
-            </div>
-            <div class="page-actions">
-                <a class="button button--secondary" href="{{ official_holiday_create_url }}">Crear festivo</a>
+                <p class="text-secondary">Consulta solo los festivos oficiales sincronizados desde BOE. Para vacaciones, fiestas locales, puentes o cualquier otro cierre del negocio, usa Cierres manuales.</p>
             </div>
         </div>
 
@@ -192,6 +189,80 @@
                     <button class="button button--secondary" type="submit">Importar BOE</button>
                 </div>
             </form>
+
+            <div class="stack-sm">
+                <h3>Ultimo sync BOE completado</h3>
+                {% if last_boe_sync_trace %}
+                <p class="text-secondary">
+                    Ultima actualizacion registrada el {{ last_boe_sync_trace.synced_at|date:"d/m/Y H:i" }}.
+                </p>
+
+                <div class="summary-strip">
+                    <article class="summary-strip__item">
+                        <p class="summary-strip__label">Año importado</p>
+                        <strong class="summary-strip__value">{{ last_boe_sync_trace.year }}</strong>
+                        <p class="summary-strip__meta">ejercicio objetivo del sync</p>
+                    </article>
+                    <article class="summary-strip__item">
+                        <p class="summary-strip__label">Creados</p>
+                        <strong class="summary-strip__value">{{ last_boe_sync_trace.created_count }}</strong>
+                        <p class="summary-strip__meta">festivos nuevos guardados</p>
+                    </article>
+                    <article class="summary-strip__item">
+                        <p class="summary-strip__label">Ignorados</p>
+                        <strong class="summary-strip__value">{{ last_boe_sync_trace.skipped_existing_count }}</strong>
+                        <p class="summary-strip__meta">fechas ya existentes</p>
+                    </article>
+                    <article class="summary-strip__item">
+                        <p class="summary-strip__label">Errores</p>
+                        <strong class="summary-strip__value">{{ last_boe_sync_trace.error_count }}</strong>
+                        <p class="summary-strip__meta">incidencias al guardar</p>
+                    </article>
+                </div>
+
+                <div class="stack-sm">
+                    <p><strong>Resolucion usada</strong></p>
+                    {% if last_boe_sync_trace.resolution_url %}
+                    <p>
+                        <a class="summary-strip__link" href="{{ last_boe_sync_trace.resolution_url }}" target="_blank" rel="noopener noreferrer">
+                            {{ last_boe_sync_trace.resolution_identifier }}
+                        </a>
+                    </p>
+                    {% else %}
+                    <p><strong>{{ last_boe_sync_trace.resolution_identifier }}</strong></p>
+                    {% endif %}
+                    <p class="text-secondary">{{ last_boe_sync_trace.resolution_title }}</p>
+                </div>
+                {% else %}
+                <p class="text-secondary">
+                    Todavia no hay una importacion BOE completada registrada en esta agenda.
+                </p>
+                {% endif %}
+            </div>
+
+            <div class="stack-sm">
+                <h3>Ultimo fallo de sync BOE</h3>
+                {% if last_boe_sync_failure_trace %}
+                <p class="text-secondary">
+                    Ultimo intento fallido registrado el {{ last_boe_sync_failure_trace.failed_at|date:"d/m/Y H:i" }}.
+                </p>
+                <div class="alert alert--danger">
+                    {% if last_boe_sync_failure_trace.year %}
+                    <p><strong>Año intentado:</strong> {{ last_boe_sync_failure_trace.year }}</p>
+                    {% endif %}
+                    <p>{{ last_boe_sync_failure_trace.message }}</p>
+                </div>
+                <form method="post" class="page-actions">
+                    {% csrf_token %}
+                    <input type="hidden" name="agenda_action" value="clear_sync_failure">
+                    <button class="button button--ghost" type="submit">Limpiar ultimo fallo</button>
+                </form>
+                {% else %}
+                <p class="text-secondary">
+                    Todavia no hay un fallo de sync BOE registrado en esta agenda.
+                </p>
+                {% endif %}
+            </div>
         </div>
 
         {% if official_holidays %}
@@ -202,7 +273,6 @@
                         <th>Fecha</th>
                         <th>Nombre</th>
                         <th>Origen</th>
-                        <th>Acciones</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -211,12 +281,6 @@
                         <td>{{ official_holiday.day|date:"d/m/Y" }}</td>
                         <td><strong>{{ official_holiday.name }}</strong></td>
                         <td>{{ official_holiday.get_source_display }}</td>
-                        <td>
-                            <div class="page-actions agenda-settings__table-actions">
-                                <a class="button button--secondary" href="{% url 'core:official_holiday_update' official_holiday.pk %}">Editar</a>
-                                <a class="button button--ghost" href="{% url 'core:official_holiday_delete' official_holiday.pk %}">Eliminar</a>
-                            </div>
-                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -225,8 +289,7 @@
         {% else %}
         <div class="empty-state">
             <p class="empty-state__icon">Sin festivos oficiales</p>
-            <p class="text-secondary">Todavia no hay festivos oficiales guardados para la agenda global.</p>
-            <a class="button button--secondary" href="{{ official_holiday_create_url }}">Crear primer festivo</a>
+            <p class="text-secondary">Todavia no hay festivos oficiales sincronizados para la agenda global.</p>
         </div>
         {% endif %}
     </article>

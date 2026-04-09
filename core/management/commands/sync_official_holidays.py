@@ -37,6 +37,7 @@ class OfficialHolidaySyncResult:
     created_count: int
     skipped_existing_count: int
     error_count: int
+    reconciled_count: int = 0
 
 
 class BoeNationalHolidaySyncService:
@@ -209,25 +210,60 @@ def import_boe_national_holidays(
     created_count = 0
     skipped_existing_count = 0
     error_count = 0
+    reconciled_count = 0
+    year_start = date(target_year, 1, 1)
+    next_year_start = date(target_year + 1, 1, 1)
+    authoritative_holidays_by_day = {holiday.day: holiday for holiday in holidays}
+    authoritative_days = set(authoritative_holidays_by_day)
 
     with transaction.atomic():
+        synced_holidays_for_year = OfficialHoliday.objects.filter(
+            source=OfficialHoliday.Source.BOE_NATIONAL_SYNC,
+            day__gte=year_start,
+            day__lt=next_year_start,
+        )
+        outdated_synced_holidays = synced_holidays_for_year.exclude(day__in=authoritative_days)
+        outdated_count = outdated_synced_holidays.count()
+        if outdated_count:
+            outdated_synced_holidays.delete()
+            reconciled_count += outdated_count
+
+        existing_holidays_by_day = {
+            official_holiday.day: official_holiday
+            for official_holiday in OfficialHoliday.objects.filter(
+                day__gte=year_start,
+                day__lt=next_year_start,
+            ).order_by("day", "id")
+        }
+
         for holiday in holidays:
-            if OfficialHoliday.objects.filter(day=holiday.day).exists():
-                skipped_existing_count += 1
+            existing_holiday = existing_holidays_by_day.get(holiday.day)
+            if existing_holiday is None:
+                try:
+                    created_holiday = OfficialHoliday.objects.create(
+                        day=holiday.day,
+                        name=holiday.name,
+                        source=OfficialHoliday.Source.BOE_NATIONAL_SYNC,
+                    )
+                except (IntegrityError, ValueError) as error:
+                    error_count += 1
+                    if error_reporter is not None:
+                        error_reporter(f"Error al importar {holiday.day:%Y-%m-%d} ({holiday.name}): {error}")
+                else:
+                    created_count += 1
+                    existing_holidays_by_day[holiday.day] = created_holiday
                 continue
 
-            try:
-                OfficialHoliday.objects.create(
-                    day=holiday.day,
-                    name=holiday.name,
-                    source=OfficialHoliday.Source.BOE_NATIONAL_SYNC,
-                )
-            except (IntegrityError, ValueError) as error:
-                error_count += 1
-                if error_reporter is not None:
-                    error_reporter(f"Error al importar {holiday.day:%Y-%m-%d} ({holiday.name}): {error}")
-            else:
-                created_count += 1
+            if (
+                existing_holiday.source == OfficialHoliday.Source.BOE_NATIONAL_SYNC
+                and existing_holiday.name != holiday.name
+            ):
+                existing_holiday.name = holiday.name
+                existing_holiday.save(update_fields=["name"])
+                reconciled_count += 1
+                continue
+
+            skipped_existing_count += 1
 
     return OfficialHolidaySyncResult(
         target_year=target_year,
@@ -235,6 +271,7 @@ def import_boe_national_holidays(
         created_count=created_count,
         skipped_existing_count=skipped_existing_count,
         error_count=error_count,
+        reconciled_count=reconciled_count,
     )
 
 
@@ -261,6 +298,7 @@ class Command(BaseCommand):
                 "Importacion completada: "
                 f"creados={result.created_count}, "
                 f"ignorados_existentes={result.skipped_existing_count}, "
+                f"reconciliados={result.reconciled_count}, "
                 f"errores={result.error_count}."
             )
         )

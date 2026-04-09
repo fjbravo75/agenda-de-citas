@@ -22,6 +22,18 @@ class AgendaSettings(models.Model):
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     saturdays_non_working = models.BooleanField(default=True)
     sundays_non_working = models.BooleanField(default=True)
+    official_holidays_non_working = models.BooleanField(default=True)
+    last_boe_sync_at = models.DateTimeField(null=True, blank=True)
+    last_boe_sync_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    last_boe_sync_resolution_identifier = models.CharField(max_length=32, blank=True)
+    last_boe_sync_resolution_title = models.TextField(blank=True)
+    last_boe_sync_resolution_url = models.URLField(blank=True)
+    last_boe_sync_created_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    last_boe_sync_skipped_existing_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    last_boe_sync_error_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    last_boe_sync_failure_at = models.DateTimeField(null=True, blank=True)
+    last_boe_sync_failure_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    last_boe_sync_failure_message = models.TextField(blank=True)
 
     class Meta:
         verbose_name = "configuracion global de agenda"
@@ -29,6 +41,18 @@ class AgendaSettings(models.Model):
 
     def __str__(self):
         return "Configuracion global de agenda"
+
+    @property
+    def has_boe_sync_trace(self):
+        return bool(
+            self.last_boe_sync_at
+            and self.last_boe_sync_year
+            and self.last_boe_sync_resolution_identifier
+        )
+
+    @property
+    def has_boe_sync_failure_trace(self):
+        return bool(self.last_boe_sync_failure_at and self.last_boe_sync_failure_message)
 
     @classmethod
     def get_solo(cls):

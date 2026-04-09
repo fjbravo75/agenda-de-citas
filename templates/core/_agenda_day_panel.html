@@ -7,6 +7,8 @@
         {% if selected_day_status_notes %}
         <p class="agenda-panel__status-copy">{{ selected_day_status_notes }}</p>
         {% endif %}
+        {% elif selected_day_secondary_notice %}
+        <p class="agenda-panel__status-copy">{{ selected_day_secondary_notice }}</p>
         {% endif %}
     </div>
 

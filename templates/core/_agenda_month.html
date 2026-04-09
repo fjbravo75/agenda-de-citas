@@ -50,7 +50,7 @@
             <article class="agenda-day{% if day.outside %} agenda-day--outside{% endif %}{% if day.today %} agenda-day--today{% endif %}{% if day.selected %} agenda-day--selected{% endif %}{% if day.status_kind %} agenda-day--{{ day.status_kind }}{% endif %}">
                 {% if calendar_interactive %}
                 <a
-                    class="agenda-day__link"
+                    class="agenda-day__link{% if day.primary_state %} agenda-day__link--stateful{% endif %}"
                     href="{{ calendar_base_url }}?{{ day.querystring }}"
                     {% if calendar_hx_enabled %}
                     hx-get="{{ calendar_base_url }}?{{ day.querystring }}"
@@ -63,18 +63,37 @@
                 >
                 {% else %}
                 <div
-                    class="agenda-day__link agenda-day__link--static"
+                    class="agenda-day__link agenda-day__link--static{% if day.primary_state %} agenda-day__link--stateful{% endif %}"
                     {% if day.selected %}aria-current="date"{% endif %}
                 >
                 {% endif %}
                     <div class="agenda-day__top">
                         <span class="agenda-day__number">{{ day.number }}</span>
+                        {% if day.secondary_holiday_marker %}
+                        <span
+                            class="agenda-day__marker"
+                            title="{{ day.secondary_holiday_marker_title }}"
+                            aria-label="{{ day.secondary_holiday_marker_title }}"
+                        >{{ day.secondary_holiday_marker }}</span>
+                        {% endif %}
                     </div>
-                    <div class="agenda-day__markers">
-                        {% for marker in day.markers %}
-                        <span class="agenda-day__marker{% if marker.kind %} agenda-day__marker--{{ marker.kind }}{% endif %}">{{ marker.label }}</span>
+                    {% if day.primary_state %}
+                    <div class="agenda-day__state agenda-day__state--{{ day.primary_state.kind }}">
+                        {% for line in day.primary_state.lines %}
+                        <span class="agenda-day__state-line">{{ line }}</span>
                         {% endfor %}
                     </div>
+                    {% endif %}
+                    {% if day.markers %}
+                    <div class="agenda-day__markers">
+                        {% for marker in day.markers %}
+                        <span
+                            class="agenda-day__marker{% if marker.kind %} agenda-day__marker--{{ marker.kind }}{% endif %}"
+                            {% if marker.kind == 'official-holiday' %}title="{{ marker.label }}" aria-label="{{ marker.label }}"{% endif %}
+                        >{{ marker.label }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
                 {% if calendar_interactive %}
                 </a>
                 {% else %}

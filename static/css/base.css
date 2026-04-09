@@ -1156,11 +1156,15 @@ h3 {
 }
 
 .agenda-day--manual-closure {
-    background: #fff5f2;
+    background: var(--color-success-soft);
 }
 
 .agenda-day--non-working {
-    background: #faf7f0;
+    background: var(--color-warning-soft);
+}
+
+.agenda-day--official-holiday {
+    background: var(--color-danger-soft);
 }
 
 .agenda-day__top {
@@ -1187,6 +1191,10 @@ h3 {
     cursor: default;
 }
 
+.agenda-day__link--stateful {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
 .agenda-day__number {
     font-size: 14px;
     font-weight: 700;
@@ -1201,6 +1209,48 @@ h3 {
 .agenda-day--today .agenda-day__number,
 .agenda-day--selected .agenda-day__number {
     color: var(--color-accent);
+}
+
+.agenda-day__state {
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    text-align: center;
+    min-height: 0;
+    gap: 2px;
+    padding-inline: 4px;
+}
+
+.agenda-day__state--non-working {
+    gap: 1px;
+}
+
+.agenda-day__state-line {
+    font-size: 9px;
+    line-height: 1.2;
+    font-weight: 500;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.agenda-day__state--non-working .agenda-day__state-line {
+    color: var(--color-warning);
+}
+
+.agenda-day__state--non-working .agenda-day__state-line:last-child {
+    font-weight: 450;
+}
+
+.agenda-day__state--official-holiday .agenda-day__state-line {
+    color: var(--color-danger);
+}
+
+.agenda-day__state--manual-closure .agenda-day__state-line {
+    color: var(--color-success);
 }
 
 .agenda-day__markers {
@@ -1231,6 +1281,11 @@ h3 {
 }
 
 .agenda-day__marker--manual-closure {
+    color: var(--color-danger);
+    font-weight: 500;
+}
+
+.agenda-day__marker--official-holiday {
     color: var(--color-danger);
     font-weight: 500;
 }

@@ -48,14 +48,19 @@ class ClientForm(forms.ModelForm):
 class AgendaSettingsForm(forms.ModelForm):
     class Meta:
         model = AgendaSettings
-        fields = ("saturdays_non_working", "sundays_non_working")
+        fields = ("saturdays_non_working", "sundays_non_working", "official_holidays_non_working")
         labels = {
             "saturdays_non_working": "Sabados no operativos",
             "sundays_non_working": "Domingos no operativos",
+            "official_holidays_non_working": "Aplicar festivos oficiales como no operativos",
         }
         help_texts = {
             "saturdays_non_working": "Activa este ajuste si la parrilla fija no debe abrirse los sabados.",
             "sundays_non_working": "Activa este ajuste si la parrilla fija no debe abrirse los domingos.",
+            "official_holidays_non_working": (
+                "Si lo desactivas, los festivos oficiales seguiran visibles como dato, "
+                "pero no cerraran operativamente la agenda."
+            ),
         }
 
 

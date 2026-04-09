@@ -68,7 +68,7 @@ class DayAvailabilityResolver:
             )
 
         official_holiday = self._official_holiday_for_day(target_day)
-        if official_holiday is not None:
+        if official_holiday is not None and self.agenda_settings.official_holidays_non_working:
             return ResolvedDayAvailability(
                 day=target_day,
                 status=self.OFFICIAL_HOLIDAY,
@@ -83,6 +83,7 @@ class DayAvailabilityResolver:
                 status=self.NON_WORKING_SATURDAY,
                 label="Sabado no laborable",
                 is_working_day=False,
+                official_holiday=official_holiday,
             )
 
         if target_day.weekday() == 6 and self.agenda_settings.sundays_non_working:
@@ -91,6 +92,7 @@ class DayAvailabilityResolver:
                 status=self.NON_WORKING_SUNDAY,
                 label="Domingo no laborable",
                 is_working_day=False,
+                official_holiday=official_holiday,
             )
 
         return ResolvedDayAvailability(
@@ -98,6 +100,7 @@ class DayAvailabilityResolver:
             status=self.WORKING_DAY,
             label="Laborable",
             is_working_day=True,
+            official_holiday=official_holiday,
         )
 
     def _manual_closure_for_day(self, target_day: date) -> ManualClosure | None:

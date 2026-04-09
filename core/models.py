@@ -18,16 +18,6 @@ AGENDA_SLOT_VALUES = tuple(time.fromisoformat(slot_time) for slot_time in AGENDA
 DEFAULT_SLOT_CAPACITY = 3
 
 
-class Weekday(models.IntegerChoices):
-    MONDAY = 0, "Lunes"
-    TUESDAY = 1, "Martes"
-    WEDNESDAY = 2, "Miercoles"
-    THURSDAY = 3, "Jueves"
-    FRIDAY = 4, "Viernes"
-    SATURDAY = 5, "Sabado"
-    SUNDAY = 6, "Domingo"
-
-
 class AgendaSettings(models.Model):
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     saturdays_non_working = models.BooleanField(default=True)
@@ -303,13 +293,14 @@ class Appointment(models.Model):
         ):
             errors["start_at"] = f"La agenda no opera el dia seleccionado: {resolved_day.label}."
 
-        slot_state = agenda_slot_booking_state(target_day, exclude_pk=self.pk).get(exact_slot_time, {})
+        slot_snapshot = agenda_slot_operational_state_map(
+            target_day,
+            exclude_pk=self.pk,
+        ).get(exact_slot_time, {})
 
-        if not errors and not slot_state.get("is_within_availability"):
-            errors["start_at"] = "El tramo seleccionado queda fuera de la disponibilidad."
-        elif not errors and slot_state.get("blocked_label"):
+        if not errors and slot_snapshot.get("blocked_label"):
             errors["start_at"] = "El tramo seleccionado esta bloqueado."
-        elif not errors and slot_state.get("is_complete"):
+        elif not errors and slot_snapshot.get("is_complete"):
             errors["start_at"] = "El tramo seleccionado ya ha alcanzado su capacidad maxima."
 
         if errors:
@@ -329,27 +320,6 @@ class Appointment(models.Model):
             persisted_appointment.slot_day == target_day
             and persisted_appointment.slot_time == exact_slot_time
         )
-
-
-class WeeklyAvailability(models.Model):
-    weekday = models.PositiveSmallIntegerField(choices=Weekday.choices)
-    slot_time = models.CharField(max_length=5, choices=AGENDA_SLOT_TIME_CHOICES)
-    capacity = models.PositiveSmallIntegerField(
-        default=DEFAULT_SLOT_CAPACITY,
-        validators=[MinValueValidator(1)],
-    )
-
-    class Meta:
-        ordering = ("weekday", "slot_time", "id")
-        constraints = [
-            models.UniqueConstraint(
-                fields=("weekday", "slot_time"),
-                name="core_weeklyavailability_unique_slot",
-            ),
-        ]
-
-    def __str__(self):
-        return f"{Weekday(self.weekday).label} {self.slot_time} · capacidad {self.capacity}"
 
 
 class AvailabilityBlock(models.Model):
@@ -390,34 +360,34 @@ def agenda_active_slot_counts(target_day, exclude_pk=None):
     return counts
 
 
-def agenda_slot_booking_state(target_day, exclude_pk=None):
-    capacities = dict(
-        WeeklyAvailability.objects.filter(weekday=target_day.weekday()).values_list("slot_time", "capacity")
-    )
+def agenda_slot_capacity_map(target_day):
+    return {slot_time: DEFAULT_SLOT_CAPACITY for slot_time in AGENDA_SLOT_TIMES}
+
+
+def agenda_slot_operational_state_map(target_day, exclude_pk=None):
+    capacities = agenda_slot_capacity_map(target_day)
     blocked_labels = {
         block.slot_time: block.label or "Bloqueo puntual"
         for block in AvailabilityBlock.objects.filter(day=target_day).order_by("slot_time", "id")
     }
     active_counts = agenda_active_slot_counts(target_day, exclude_pk=exclude_pk)
 
-    slot_state = {}
+    slot_state_map = {}
     for slot_time in AGENDA_SLOT_TIMES:
         capacity = capacities.get(slot_time)
         active_count = active_counts.get(slot_time, 0)
         blocked_label = blocked_labels.get(slot_time, "")
-        is_within_availability = capacity is not None
-        is_complete = bool(capacity) and active_count >= capacity and not blocked_label
-        can_book = is_within_availability and not blocked_label and not is_complete
-        remaining_capacity = max((capacity or 0) - active_count, 0) if capacity is not None else 0
+        is_complete = active_count >= capacity and not blocked_label
+        can_book = not blocked_label and not is_complete
+        remaining_capacity = max(capacity - active_count, 0)
 
-        slot_state[slot_time] = {
+        slot_state_map[slot_time] = {
             "capacity": capacity,
             "active_count": active_count,
             "blocked_label": blocked_label,
-            "is_within_availability": is_within_availability,
             "is_complete": is_complete,
             "can_book": can_book,
             "remaining_capacity": remaining_capacity,
         }
 
-    return slot_state
+    return slot_state_map

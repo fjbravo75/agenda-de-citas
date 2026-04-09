@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Appointment, AvailabilityBlock, Client, Service, WeeklyAvailability
+from .models import Appointment, AvailabilityBlock, Client, Service
 
 
 @admin.register(Client)
@@ -22,13 +22,6 @@ class AppointmentAdmin(admin.ModelAdmin):
     search_fields = ("client__name", "service__name", "internal_notes")
     autocomplete_fields = ("client", "service")
     date_hierarchy = "start_at"
-
-
-@admin.register(WeeklyAvailability)
-class WeeklyAvailabilityAdmin(admin.ModelAdmin):
-    list_display = ("weekday", "slot_time", "capacity")
-    list_filter = ("weekday",)
-    search_fields = ("slot_time",)
 
 
 @admin.register(AvailabilityBlock)

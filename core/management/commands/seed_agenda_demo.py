@@ -4,7 +4,8 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from core.models import Appointment, AvailabilityBlock, Client, Service, Weekday, WeeklyAvailability
+from core.day_availability import DayAvailabilityResolver
+from core.models import Appointment, AvailabilityBlock, Client, Service
 
 
 class Command(BaseCommand):
@@ -14,7 +15,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--reset",
             action="store_true",
-            help="Delete existing Client, Service, and Appointment records before recreating the demo dataset.",
+            help="Delete existing clients, services, appointments and blocks before recreating the demo dataset.",
         )
 
     def handle(self, *args, **options):
@@ -28,7 +29,6 @@ class Command(BaseCommand):
         with transaction.atomic():
             if reset:
                 AvailabilityBlock.objects.all().delete()
-                WeeklyAvailability.objects.all().delete()
                 Appointment.objects.all().delete()
                 Service.objects.all().delete()
                 Client.objects.all().delete()
@@ -36,7 +36,6 @@ class Command(BaseCommand):
             dataset = self._build_dataset()
             clients = self._create_clients(dataset["clients"])
             services = self._create_services(dataset["services"])
-            availability_count = self._create_weekly_availability(dataset["weekly_availability"])
             block_count = self._create_availability_blocks(dataset["availability_blocks"])
             created_appointments = self._create_appointments(dataset["appointments"], clients, services)
 
@@ -45,7 +44,6 @@ class Command(BaseCommand):
                 "Agenda demo loaded: "
                 f"{len(clients)} clients, "
                 f"{len(services)} services, "
-                f"{availability_count} availability slots, "
                 f"{block_count} blocks, "
                 f"{created_appointments} appointments."
             )
@@ -56,18 +54,31 @@ class Command(BaseCommand):
             Client.objects.exists()
             or Service.objects.exists()
             or Appointment.objects.exists()
-            or WeeklyAvailability.objects.exists()
             or AvailabilityBlock.objects.exists()
         )
 
+    def _next_working_days(self, start_day, *, count):
+        working_days = []
+        candidate_day = start_day
+
+        while len(working_days) < count:
+            if DayAvailabilityResolver.resolve_for_global_agenda(candidate_day).is_working_day:
+                working_days.append(candidate_day)
+            candidate_day += timedelta(days=1)
+
+            if (candidate_day - start_day).days > 60:
+                raise CommandError("Unable to find enough working days to build the demo agenda dataset.")
+
+        return working_days
+
     def _build_dataset(self):
-        today = timezone.localdate()
+        working_days = self._next_working_days(timezone.localdate(), count=5)
         demo_days = {
-            "today": today,
-            "next_day": today + timedelta(days=1),
-            "two_days": today + timedelta(days=2),
-            "four_days": today + timedelta(days=4),
-            "one_week": today + timedelta(days=7),
+            "today": working_days[0],
+            "next_day": working_days[1],
+            "two_days": working_days[2],
+            "four_days": working_days[3],
+            "one_week": working_days[4],
         }
 
         return {
@@ -86,11 +97,6 @@ class Command(BaseCommand):
                 {"name": "Seguimiento", "duration_minutes": 30, "color": "#A06A11"},
                 {"name": "Evaluacion", "duration_minutes": 60, "color": "#AE4C42"},
                 {"name": "Control", "duration_minutes": 30, "color": "#6D7A8C"},
-            ],
-            "weekly_availability": [
-                {"weekday": weekday, "slot_time": slot_time, "capacity": 3}
-                for weekday in Weekday.values
-                for slot_time in ("09:00", "10:00", "11:00", "12:00", "16:00", "17:00", "18:00")
             ],
             "availability_blocks": [
                 {"day": demo_days["today"], "slot_time": "16:00", "label": "Bloqueo interno"},
@@ -179,13 +185,6 @@ class Command(BaseCommand):
             services[service.name] = service
         return services
 
-    def _create_weekly_availability(self, availability_definitions):
-        created = 0
-        for definition in availability_definitions:
-            WeeklyAvailability.objects.create(**definition)
-            created += 1
-        return created
-
     def _create_availability_blocks(self, block_definitions):
         created = 0
         for definition in block_definitions:
@@ -202,13 +201,21 @@ class Command(BaseCommand):
                 datetime.combine(definition["day"], definition["start_time"]),
                 current_tz,
             )
-            Appointment.objects.create(
+            target_status = definition["status"]
+            appointment = Appointment.objects.create(
                 client=clients[definition["client"]],
                 service=service,
                 start_at=start_at,
                 end_at=start_at + timedelta(minutes=service.duration_minutes),
-                status=definition["status"],
+                status=(
+                    Appointment.Status.CONFIRMED
+                    if target_status == Appointment.Status.CANCELLED
+                    else target_status
+                ),
                 internal_notes=definition.get("internal_notes", ""),
             )
+            if target_status == Appointment.Status.CANCELLED:
+                appointment.status = Appointment.Status.CANCELLED
+                appointment.save()
             created += 1
         return created

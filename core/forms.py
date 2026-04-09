@@ -13,7 +13,7 @@ from .models import (
     ManualClosure,
     OfficialHoliday,
     Service,
-    agenda_slot_booking_state,
+    agenda_slot_operational_state_map,
 )
 
 
@@ -50,12 +50,12 @@ class AgendaSettingsForm(forms.ModelForm):
         model = AgendaSettings
         fields = ("saturdays_non_working", "sundays_non_working")
         labels = {
-            "saturdays_non_working": "Sabados no laborables",
-            "sundays_non_working": "Domingos no laborables",
+            "saturdays_non_working": "Sabados no operativos",
+            "sundays_non_working": "Domingos no operativos",
         }
         help_texts = {
-            "saturdays_non_working": "Activa este ajuste si los sabados quedan fuera de la jornada ordinaria.",
-            "sundays_non_working": "Activa este ajuste si los domingos quedan fuera de la jornada ordinaria.",
+            "saturdays_non_working": "Activa este ajuste si la parrilla fija no debe abrirse los sabados.",
+            "sundays_non_working": "Activa este ajuste si la parrilla fija no debe abrirse los domingos.",
         }
 
 
@@ -208,7 +208,7 @@ class AppointmentForm(forms.Form):
 
     def _configure_slot_field(self, target_day):
         day_availability = DayAvailabilityResolver.resolve_for_global_agenda(target_day)
-        slot_states = agenda_slot_booking_state(
+        slot_state_map = agenda_slot_operational_state_map(
             target_day,
             exclude_pk=self.instance.pk if self.instance.pk else None,
         )
@@ -216,11 +216,23 @@ class AppointmentForm(forms.Form):
         disabled_values = set()
 
         for slot_time, _ in AGENDA_SLOT_TIME_CHOICES:
-            slot_state = slot_states.get(slot_time, {})
+            slot_snapshot = slot_state_map.get(slot_time, {})
             slot_choices.append(
-                (slot_time, self._slot_choice_label(slot_time, slot_state, day_availability=day_availability))
+                (
+                    slot_time,
+                    self._slot_choice_label(
+                        slot_time,
+                        slot_snapshot,
+                        day_availability=day_availability,
+                    ),
+                )
             )
-            if not self._slot_is_selectable_for_day(target_day, slot_time, slot_state, day_availability):
+            if not self._slot_is_selectable_for_day(
+                target_day,
+                slot_time,
+                slot_snapshot,
+                day_availability,
+            ):
                 disabled_values.add(slot_time)
 
         self.fields["slot_time"].choices = slot_choices
@@ -244,37 +256,35 @@ class AppointmentForm(forms.Form):
         if not day_availability.is_working_day:
             return None
 
-        slot_states = agenda_slot_booking_state(
+        slot_state_map = agenda_slot_operational_state_map(
             target_day,
             exclude_pk=self.instance.pk if self.instance.pk else None,
         )
         for slot_time, _ in AGENDA_SLOT_TIME_CHOICES:
-            if slot_states.get(slot_time, {}).get("can_book"):
+            if slot_state_map.get(slot_time, {}).get("can_book"):
                 return slot_time
         return None
 
-    def _slot_choice_label(self, slot_time, slot_state, *, day_availability):
+    def _slot_choice_label(self, slot_time, slot_snapshot, *, day_availability):
         if not day_availability.is_working_day:
             suffix = day_availability.label
             return f"{slot_time} · {suffix}"
 
-        if slot_state.get("blocked_label"):
-            suffix = slot_state["blocked_label"]
-        elif not slot_state.get("is_within_availability"):
-            suffix = "Fuera de disponibilidad"
-        elif slot_state.get("is_complete"):
+        if slot_snapshot.get("blocked_label"):
+            suffix = slot_snapshot["blocked_label"]
+        elif slot_snapshot.get("is_complete"):
             suffix = "Completo"
-        elif slot_state.get("active_count"):
-            capacity = slot_state.get("capacity")
-            occupied_label = "ocupada" if slot_state["active_count"] == 1 else "ocupadas"
-            suffix = f"{slot_state['active_count']}/{capacity} {occupied_label}"
+        elif slot_snapshot.get("active_count"):
+            capacity = slot_snapshot.get("capacity")
+            occupied_label = "ocupada" if slot_snapshot["active_count"] == 1 else "ocupadas"
+            suffix = f"{slot_snapshot['active_count']}/{capacity} {occupied_label}"
         else:
             suffix = "Disponible"
         return f"{slot_time} · {suffix}"
 
-    def _slot_is_selectable_for_day(self, target_day, slot_time, slot_state, day_availability):
+    def _slot_is_selectable_for_day(self, target_day, slot_time, slot_snapshot, day_availability):
         if day_availability.is_working_day:
-            return slot_state.get("can_book")
+            return slot_snapshot.get("can_book")
         return self._slot_matches_existing_assignment(target_day, slot_time)
 
     def _slot_matches_existing_assignment(self, target_day, slot_time):

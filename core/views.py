@@ -35,7 +35,7 @@ from .models import (
     ManualClosure,
     OfficialHoliday,
     agenda_assigned_slot_time,
-    agenda_slot_booking_state,
+    agenda_slot_operational_state_map,
 )
 
 
@@ -147,7 +147,7 @@ def _format_count_label(count, singular, plural):
 
 def _join_summary_parts(parts):
     if not parts:
-        return "Agenda ligera, sin disponibilidad configurada."
+        return "Agenda ligera, sin actividad todavia."
     if len(parts) == 1:
         return f"{parts[0]}."
     return f"{', '.join(parts[:-1])} y {parts[-1]}."
@@ -371,20 +371,18 @@ def _month_day_availability_map(visible_year, visible_month, *, agenda_settings=
     }
 
 
-def _can_create_block_for_slot_state(slot_state):
-    if not slot_state:
+def _can_create_block_for_slot_snapshot(slot_snapshot):
+    if not slot_snapshot:
         return False
-    if slot_state.get("blocked_label"):
+    if slot_snapshot.get("blocked_label"):
         return False
-    if not slot_state.get("is_within_availability"):
-        return False
-    return slot_state.get("active_count", 0) == 0
+    return slot_snapshot.get("active_count", 0) == 0
 
 
 def _build_timeline_slots(target_day, appointments, return_url="", day_availability=None):
     slots = _empty_timeline_slots()
     slot_map = {slot["time"]: slot for slot in slots}
-    slot_state = agenda_slot_booking_state(target_day)
+    slot_state_map = agenda_slot_operational_state_map(target_day)
     resolved_day = day_availability or DayAvailabilityResolver.resolve_for_global_agenda(target_day)
     day_is_closed = _is_closed_day(resolved_day)
 
@@ -394,10 +392,10 @@ def _build_timeline_slots(target_day, appointments, return_url="", day_availabil
         )
 
     for slot in slots:
-        state = slot_state[slot["time"]]
-        slot["active_entries_count"] = state["active_count"]
-        slot["capacity"] = state["capacity"]
-        slot["can_book"] = state["can_book"] and not day_is_closed
+        slot_snapshot = slot_state_map[slot["time"]]
+        slot["active_entries_count"] = slot_snapshot["active_count"]
+        slot["capacity"] = slot_snapshot["capacity"]
+        slot["can_book"] = slot_snapshot["can_book"] and not day_is_closed
 
         if slot["can_book"]:
             slot["create_url"] = _appointment_create_url_for_slot(
@@ -408,16 +406,19 @@ def _build_timeline_slots(target_day, appointments, return_url="", day_availabil
             slot["create_label"] = "Nueva cita"
 
         if not day_is_closed:
-            if state["blocked_label"]:
+            if slot_snapshot["blocked_label"]:
                 slot["block_action_label"] = "Quitar bloqueo"
-            elif _can_create_block_for_slot_state(state):
+            elif _can_create_block_for_slot_snapshot(slot_snapshot):
                 slot["block_action_label"] = "Bloquear"
 
         if slot["entries"]:
-            if state["is_complete"]:
+            if slot_snapshot["is_complete"]:
                 slot["complete_label"] = "Completo"
-            elif state["active_count"]:
-                slot["busy_label"] = _format_busy_slot_label(state["active_count"], state["capacity"])
+            elif slot_snapshot["active_count"]:
+                slot["busy_label"] = _format_busy_slot_label(
+                    slot_snapshot["active_count"],
+                    slot_snapshot["capacity"],
+                )
             else:
                 slot["busy_label"] = "Sin ocupacion activa"
             continue
@@ -426,15 +427,11 @@ def _build_timeline_slots(target_day, appointments, return_url="", day_availabil
             slot["unavailable_label"] = resolved_day.label
             continue
 
-        if state["blocked_label"]:
-            slot["blocked_label"] = state["blocked_label"]
+        if slot_snapshot["blocked_label"]:
+            slot["blocked_label"] = slot_snapshot["blocked_label"]
             continue
 
-        if state["is_within_availability"]:
-            slot["available_label"] = "Disponible"
-            continue
-
-        slot["unavailable_label"] = "Fuera de disponibilidad"
+        slot["available_label"] = "Disponible"
 
     return slots
 
@@ -800,8 +797,8 @@ class AgendaSettingsView(AppLoginRequiredMixin, FormView):
             {
                 "page_title": "Ajustes de agenda",
                 "page_description": (
-                    "Gestiona la configuracion global minima, los cierres manuales y los festivos"
-                    " oficiales de la agenda global."
+                    "La agenda ya parte de una parrilla fija de 8 tramos por dia operativo."
+                    " Aqui solo ajustas fines de semana, cierres completos y festivos oficiales."
                 ),
                 "back_url": reverse("core:app_entrypoint"),
                 "manual_closures": self.get_manual_closures(),
@@ -878,8 +875,8 @@ class AvailabilityBlockToggleView(AppLoginRequiredMixin, View):
             existing_block.delete()
             return HttpResponseRedirect(redirect_url)
 
-        slot_state = agenda_slot_booking_state(target_day).get(slot_time, {})
-        if not _can_create_block_for_slot_state(slot_state):
+        slot_snapshot = agenda_slot_operational_state_map(target_day).get(slot_time, {})
+        if not _can_create_block_for_slot_snapshot(slot_snapshot):
             return HttpResponseRedirect(redirect_url)
 
         AvailabilityBlock.objects.create(
@@ -951,8 +948,8 @@ class AppointmentFormViewBase(AppLoginRequiredMixin, FormView):
             {
                 "page_title": "Editar cita" if is_edit else "Nueva cita",
                 "page_description": (
-                    "Ajusta cliente, servicio, fecha y tramo. La validacion sigue la disponibilidad,"
-                    " los bloqueos y la capacidad real del tramo."
+                    "Ajusta cliente, servicio, fecha y tramo. La validacion sigue las reglas"
+                    " operativas del dia, los bloqueos y la capacidad real del tramo."
                 ),
                 "submit_label": "Guardar cambios" if is_edit else "Guardar cita",
                 "back_url": _safe_next_url(self.request) or _agenda_url_for_day(selected_day),

@@ -147,17 +147,7 @@
                                         </div>
 
                                         <div class="appointment-create-panel__grid-cell appointment-create-panel__grid-cell--field">
-                                            <div class="field appointment-create-panel__grid-field">
-                                                {{ form.service.label_tag }}
-                                                {{ form.service }}
-                                                {% if form.service.errors %}
-                                                <div class="field__feedback">
-                                                    {% for error in form.service.errors %}
-                                                    <p class="error-text">{{ error }}</p>
-                                                    {% endfor %}
-                                                </div>
-                                                {% endif %}
-                                            </div>
+                                            {% include "core/_appointment_services_field.html" with field=form.services field_container_class="appointment-create-panel__grid-field" %}
                                         </div>
 
                                         <div class="appointment-create-panel__grid-cell appointment-create-panel__grid-cell--field">

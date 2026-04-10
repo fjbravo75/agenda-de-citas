@@ -20,6 +20,7 @@ from .management.commands.sync_official_holidays import (
 from .day_availability import DayAvailabilityResolver
 from .forms import (
     AgendaSettingsForm,
+    AppointmentForm,
     ManualClosureForm,
     OfficialHolidaySyncForm,
     ServiceForm,
@@ -60,7 +61,6 @@ class AgendaBaseTestCase(TestCase):
         )
         return Appointment(
             client=client,
-            service=service,
             start_at=start_at,
             end_at=start_at + timedelta(minutes=service.duration_minutes),
             status=status,
@@ -69,7 +69,11 @@ class AgendaBaseTestCase(TestCase):
     def _create_appointment(self, client, service, target_day, start_time, status):
         appointment = self._build_appointment(client, service, target_day, start_time, status)
         appointment.save()
+        appointment.services.set([service])
         return appointment
+
+    def _appointment_service_ids(self, appointment):
+        return list(appointment.services.order_by("pk").values_list("pk", flat=True))
 
     def _create_existing_cancelled_appointment(
         self,
@@ -1042,9 +1046,11 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
 
     def _appointment_form_data(self, **overrides):
         today = timezone.localdate()
+        service_id = overrides.pop("service", self.review_service.pk)
+        services = overrides.pop("services", [service_id])
         data = {
             "client": self.primary_client.pk,
-            "service": self.review_service.pk,
+            "services": services,
             "day": today.isoformat(),
             "slot_time": "11:00",
             "status": Appointment.Status.PENDING,
@@ -1063,6 +1069,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         appointment = Appointment.objects.get()
         self.assertEqual(appointment.slot_day, today)
         self.assertEqual(appointment.slot_time, "11:00")
+        self.assertEqual(self._appointment_service_ids(appointment), [self.review_service.pk])
 
     def test_create_view_can_create_a_valid_appointment_without_weekly_availability(self):
         today = timezone.localdate()
@@ -1074,6 +1081,35 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         appointment = Appointment.objects.get()
         self.assertEqual(appointment.slot_day, today)
         self.assertEqual(appointment.slot_time, "11:00")
+
+    def test_create_view_can_create_appointment_with_multiple_services_and_max_duration_end_at(self):
+        today = timezone.localdate()
+
+        response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(
+                services=[self.review_service.pk, self.control_service.pk],
+            ),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        appointment = Appointment.objects.get()
+        self.assertEqual(
+            self._appointment_service_ids(appointment),
+            [self.review_service.pk, self.control_service.pk],
+        )
+        self.assertEqual(appointment.end_at, appointment.start_at + timedelta(minutes=45))
+
+        agenda_response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": today.year, "month": today.month, "day": today.day},
+        )
+        slot_11 = self._slot_context(agenda_response, "11:00")
+        self.assertEqual(slot_11["entries"][0]["service_label"], "Varios servicios")
+        self.assertContains(agenda_response, "Varios servicios")
+
+        history_response = self.client.get(reverse("core:client_detail", args=[self.primary_client.pk]))
+        self.assertContains(history_response, "Varios servicios")
 
     def test_create_view_keeps_slot_based_validation_even_when_another_service_runs_long(self):
         today = timezone.localdate()
@@ -1125,6 +1161,11 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertContains(response, "Elige un día y prepara la cita.")
         self.assertContains(response, "Tramos del día")
         self.assertContains(response, 'class="appointment-create-panel__form-fields"')
+        self.assertContains(response, 'data-service-picker')
+        self.assertContains(response, "Servicios")
+        self.assertContains(response, 'data-service-picker-placeholder="Servicios"')
+        self.assertContains(response, "/static/js/app.js?v=20260410-selector-fix")
+        self.assertNotContains(response, "Selecciona servicios")
         self.assertContains(response, 'data-slot-picker')
         self.assertContains(response, 'type="hidden" name="day"')
         self.assertNotContains(response, "Formulario")
@@ -1736,7 +1777,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             reverse("core:appointment_update", args=[appointment.pk]),
             self._appointment_form_data(
                 client=appointment.client_id,
-                service=appointment.service_id,
+                services=self._appointment_service_ids(appointment),
                 day=today.isoformat(),
                 slot_time="10:00",
                 status=appointment.status,
@@ -1769,6 +1810,37 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(appointment.slot_time, "11:00")
         self.assertEqual(appointment.status, Appointment.Status.PENDING)
         self.assertEqual(appointment.internal_notes, "Cambio valido")
+        self.assertEqual(self._appointment_service_ids(appointment), [self.control_service.pk])
+
+    def test_update_view_can_store_multiple_services_and_uses_max_duration_end_at(self):
+        today = timezone.localdate()
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.control_service,
+            today,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        response = self.client.post(
+            reverse("core:appointment_update", args=[appointment.pk]),
+            self._appointment_form_data(
+                client=appointment.client_id,
+                services=[self.review_service.pk, self.control_service.pk],
+                day=today.isoformat(),
+                slot_time="11:00",
+                status=Appointment.Status.PENDING,
+                internal_notes="Dos servicios",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        appointment.refresh_from_db()
+        self.assertEqual(
+            self._appointment_service_ids(appointment),
+            [self.review_service.pk, self.control_service.pk],
+        )
+        self.assertEqual(appointment.end_at, appointment.start_at + timedelta(minutes=45))
 
     def test_update_view_rejects_move_to_non_operational_day(self):
         working_day = self._next_weekday(2)
@@ -1785,7 +1857,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             reverse("core:appointment_update", args=[appointment.pk]),
             self._appointment_form_data(
                 client=appointment.client_id,
-                service=appointment.service_id,
+                services=self._appointment_service_ids(appointment),
                 day=closed_day.isoformat(),
                 slot_time="11:00",
                 status=appointment.status,
@@ -1833,7 +1905,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             reverse("core:appointment_update", args=[appointment.pk]),
             self._appointment_form_data(
                 client=appointment.client_id,
-                service=appointment.service_id,
+                services=self._appointment_service_ids(appointment),
                 day=today.isoformat(),
                 slot_time="09:00",
                 status=Appointment.Status.CANCELLED,
@@ -1885,7 +1957,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             reverse("core:appointment_update", args=[appointment.pk]),
             self._appointment_form_data(
                 client=appointment.client_id,
-                service=appointment.service_id,
+                services=self._appointment_service_ids(appointment),
                 day=today.isoformat(),
                 slot_time="09:00",
                 status=Appointment.Status.CANCELLED,
@@ -1920,7 +1992,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             reverse("core:appointment_update", args=[appointment.pk]),
             self._appointment_form_data(
                 client=appointment.client_id,
-                service=appointment.service_id,
+                services=self._appointment_service_ids(appointment),
                 day=today.isoformat(),
                 slot_time="10:00",
                 status=Appointment.Status.CANCELLED,
@@ -1948,7 +2020,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             reverse("core:appointment_update", args=[appointment.pk]),
             self._appointment_form_data(
                 client=appointment.client_id,
-                service=appointment.service_id,
+                services=self._appointment_service_ids(appointment),
                 day=today.isoformat(),
                 slot_time="10:00",
                 status=Appointment.Status.CANCELLED,
@@ -1996,7 +2068,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             reverse("core:appointment_update", args=[appointment.pk]),
             self._appointment_form_data(
                 client=appointment.client_id,
-                service=appointment.service_id,
+                services=self._appointment_service_ids(appointment),
                 day=today.isoformat(),
                 slot_time="10:00",
                 status=Appointment.Status.CANCELLED,
@@ -2025,7 +2097,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             reverse("core:appointment_update", args=[appointment.pk]),
             self._appointment_form_data(
                 client=appointment.client_id,
-                service=appointment.service_id,
+                services=self._appointment_service_ids(appointment),
                 day=today.isoformat(),
                 slot_time="09:00",
                 status=appointment.status,
@@ -2046,7 +2118,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             reverse("core:appointment_update", args=[appointment.pk]),
             self._appointment_form_data(
                 client=appointment.client_id,
-                service=appointment.service_id,
+                services=self._appointment_service_ids(appointment),
                 day=today.isoformat(),
                 slot_time="09:00",
                 status=appointment.status,
@@ -3391,6 +3463,148 @@ class AgendaSettingsViewTests(AuthenticatedAgendaBaseTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("year", response.context["sync_form"].errors)
+
+
+class ServiceSettingsViewTests(AuthenticatedAgendaBaseTestCase):
+    def test_service_settings_returns_200_and_lists_operational_services(self):
+        self.control_service.is_active = False
+        self.control_service.save(update_fields=["is_active"])
+
+        response = self.client.get(reverse("core:service_settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/service_settings.html")
+        self.assertEqual(response.context["back_url"], reverse("core:settings_index"))
+        self.assertEqual(list(response.context["services"]), [self.review_service])
+        self.assertEqual(
+            response.context["settings_breadcrumbs"],
+            [
+                {"label": "Ajustes", "url": reverse("core:settings_index")},
+                {"label": "Servicios", "url": ""},
+            ],
+        )
+        self.assertContains(response, 'class="settings-breadcrumbs"')
+        self.assertContains(response, f'href="{reverse("core:settings_index")}">Ajustes</a>')
+        self.assertContains(response, 'aria-current="page">Servicios</span>')
+        self.assertContains(response, "Servicios")
+        self.assertContains(response, "Define los servicios que puedes reservar en tu agenda.")
+        self.assertContains(response, "Catalogo operativo")
+        self.assertContains(response, "Nuevo servicio")
+        self.assertContains(response, self.review_service.name)
+        self.assertContains(response, reverse("core:service_create"))
+        self.assertContains(response, reverse("core:service_update", args=[self.review_service.pk]))
+        self.assertContains(response, reverse("core:service_delete", args=[self.review_service.pk]))
+        self.assertNotContains(response, self.control_service.name)
+        self.assertNotContains(response, "Duracion")
+        self.assertNotContains(response, "Color")
+        self.assertNotContains(response, self.review_service.color)
+        self.assertContains(response, reverse("core:settings_index"))
+        self.assertNotContains(response, "Volver a Ajustes")
+
+    def test_service_settings_renders_empty_state_when_no_active_services(self):
+        Service.objects.update(is_active=False)
+
+        response = self.client.get(reverse("core:service_settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sin servicios")
+        self.assertContains(response, "Todavia no hay servicios disponibles para reservar en la agenda.")
+        self.assertContains(response, "Crear primer servicio")
+
+    def test_service_create_view_renders_minimal_form(self):
+        response = self.client.get(reverse("core:service_create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/service_form.html")
+        self.assertEqual(
+            response.context["settings_breadcrumbs"],
+            [
+                {"label": "Ajustes", "url": reverse("core:settings_index")},
+                {"label": "Servicios", "url": reverse("core:service_settings")},
+                {"label": "Nuevo servicio", "url": ""},
+            ],
+        )
+        self.assertContains(response, "Nuevo servicio")
+        self.assertContains(response, "Nombre")
+        self.assertContains(response, "Descripcion")
+        self.assertNotContains(response, 'name="duration_minutes"')
+        self.assertNotContains(response, 'name="color"')
+
+    def test_service_create_view_creates_active_service(self):
+        response = self.client.post(
+            reverse("core:service_create"),
+            {
+                "name": "Primera consulta",
+                "description": "Sesion inicial para valorar el caso.",
+            },
+        )
+
+        self.assertRedirects(response, reverse("core:service_settings"), fetch_redirect_response=False)
+        service = Service.objects.get(name="Primera consulta")
+        self.assertEqual(service.description, "Sesion inicial para valorar el caso.")
+        self.assertTrue(service.is_active)
+        self.assertEqual(service.duration_minutes, DEFAULT_SERVICE_DURATION_MINUTES)
+        self.assertEqual(service.color, "")
+
+    def test_service_update_view_updates_name_and_description(self):
+        response = self.client.post(
+            reverse("core:service_update", args=[self.review_service.pk]),
+            {
+                "name": "Revision completa",
+                "description": "Seguimiento general.",
+            },
+        )
+
+        self.assertRedirects(response, reverse("core:service_settings"), fetch_redirect_response=False)
+        self.review_service.refresh_from_db()
+        self.assertEqual(self.review_service.name, "Revision completa")
+        self.assertEqual(self.review_service.description, "Seguimiento general.")
+        self.assertTrue(self.review_service.is_active)
+
+    def test_service_delete_view_marks_service_inactive_without_breaking_history(self):
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            timezone.localdate(),
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+
+        confirm_response = self.client.get(reverse("core:service_delete", args=[self.review_service.pk]))
+
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertTemplateUsed(confirm_response, "core/service_confirm_delete.html")
+        self.assertContains(confirm_response, "Eliminar del catalogo")
+        self.assertContains(confirm_response, "Las citas existentes conservaran esta referencia.")
+
+        response = self.client.post(reverse("core:service_delete", args=[self.review_service.pk]))
+
+        self.assertRedirects(response, reverse("core:service_settings"), fetch_redirect_response=False)
+        self.review_service.refresh_from_db()
+        appointment.refresh_from_db()
+        self.assertFalse(self.review_service.is_active)
+        self.assertEqual(self._appointment_service_ids(appointment), [self.review_service.pk])
+        self.assertTrue(Service.objects.filter(pk=self.review_service.pk).exists())
+
+        detail_response = self.client.get(reverse("core:client_detail", args=[self.primary_client.pk]))
+        self.assertContains(detail_response, self.review_service.name)
+
+    def test_deleted_service_is_hidden_for_new_appointments_but_available_to_existing_edits(self):
+        appointment = self._create_appointment(
+            self.primary_client,
+            self.control_service,
+            timezone.localdate(),
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        self.control_service.is_active = False
+        self.control_service.save(update_fields=["is_active"])
+
+        new_form = AppointmentForm()
+        edit_form = AppointmentForm(instance=appointment)
+
+        self.assertNotIn(self.control_service, list(new_form.fields["services"].queryset))
+        self.assertIn(self.control_service, list(edit_form.fields["services"].queryset))
 
 
 class ManualClosureViewTests(AuthenticatedAgendaBaseTestCase):

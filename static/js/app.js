@@ -80,6 +80,74 @@ const initAppointmentSlotPickers = () => {
     });
 };
 
+const servicePickerSummary = (checkedInputs, placeholder = "Servicios") => {
+    if (checkedInputs.length === 0) {
+        return placeholder;
+    }
+    if (checkedInputs.length === 1) {
+        return checkedInputs[0].closest("[data-service-picker-option]")?.dataset.serviceName || "1 servicio";
+    }
+    return "Varios servicios";
+};
+
+const syncServicePickerState = (picker) => {
+    const checkedInputs = Array.from(picker.querySelectorAll('input[type="checkbox"]:checked'));
+    const summary = picker.querySelector("[data-service-picker-summary]");
+    if (summary) {
+        summary.textContent = servicePickerSummary(checkedInputs, picker.dataset.servicePickerPlaceholder);
+    }
+};
+
+const setServicePickerOpen = (picker, isOpen) => {
+    const toggle = picker.querySelector("[data-service-picker-toggle]");
+    picker.classList.toggle("is-open", isOpen);
+    if (toggle) {
+        toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    }
+};
+
+const initAppointmentServicePickers = () => {
+    document.querySelectorAll("[data-service-picker]").forEach((picker) => {
+        if (picker.dataset.servicePickerReady === "true") {
+            return;
+        }
+
+        const toggle = picker.querySelector("[data-service-picker-toggle]");
+        if (!toggle) {
+            return;
+        }
+
+        toggle.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setServicePickerOpen(picker, !picker.classList.contains("is-open"));
+        });
+
+        picker.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+            checkbox.addEventListener("change", () => syncServicePickerState(picker));
+        });
+
+        picker.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+                setServicePickerOpen(picker, false);
+                toggle.focus();
+            }
+        });
+
+        syncServicePickerState(picker);
+        setServicePickerOpen(picker, false);
+        picker.dataset.servicePickerReady = "true";
+    });
+};
+
+document.addEventListener("click", (event) => {
+    document.querySelectorAll("[data-service-picker].is-open").forEach((picker) => {
+        if (!picker.contains(event.target)) {
+            setServicePickerOpen(picker, false);
+        }
+    });
+});
+
 const syncAppointmentEditDangerState = (form) => {
     const statusSelect = form.querySelector('select[name="status"]');
     const deleteModeInput = form.querySelector("[data-delete-mode-input]");
@@ -154,9 +222,11 @@ const initAppointmentEditForms = () => {
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
         initAppointmentSlotPickers();
+        initAppointmentServicePickers();
         initAppointmentEditForms();
     });
 } else {
     initAppointmentSlotPickers();
+    initAppointmentServicePickers();
     initAppointmentEditForms();
 }

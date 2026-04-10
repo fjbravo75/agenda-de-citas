@@ -1805,6 +1805,130 @@ h3 {
     font-size: 13px;
 }
 
+.appointment-services-picker {
+    position: relative;
+    min-width: 0;
+}
+
+.appointment-services-picker__toggle {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    height: 28px;
+    padding: 0 28px 0 9px;
+    border: 1px solid var(--color-field-border);
+    border-radius: 6px;
+    background: #ffffff;
+    color: var(--color-text);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.2;
+    text-align: left;
+    cursor: pointer;
+}
+
+.appointment-services-picker__toggle [data-service-picker-summary] {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.appointment-services-picker__toggle::before {
+    content: none;
+}
+
+.appointment-services-picker__toggle::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    width: 6.3px;
+    height: 6.3px;
+    border-right: 2px solid var(--color-text);
+    border-bottom: 2px solid var(--color-text);
+    transform: translateY(-60%) rotate(45deg);
+    pointer-events: none;
+}
+
+.appointment-services-field.is-open .appointment-services-picker__toggle::after {
+    border-right-color: var(--color-accent);
+    border-bottom-color: var(--color-accent);
+    transform: translateY(-35%) rotate(225deg);
+}
+
+.appointment-services-picker__toggle:focus-visible {
+    outline: none;
+    border-color: rgba(49, 88, 215, 0.35);
+    box-shadow: 0 0 0 2px rgba(49, 88, 215, 0.08);
+}
+
+.appointment-services-picker__panel {
+    display: grid;
+    gap: 2px;
+    margin-top: 6px;
+    padding: 6px;
+    border: 1px solid var(--color-line);
+    border-radius: 6px;
+    background: #ffffff;
+}
+
+.js .appointment-services-picker__panel {
+    position: absolute;
+    z-index: 20;
+    right: 0;
+    left: 0;
+    display: none;
+    max-height: 172px;
+    overflow-y: auto;
+    box-shadow: 0 12px 28px rgba(21, 32, 51, 0.12);
+}
+
+.js .appointment-services-field.is-open .appointment-services-picker__panel {
+    display: grid;
+}
+
+.appointment-services-picker__option {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 6px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.2;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--color-text);
+    cursor: pointer;
+}
+
+.appointment-create-panel .field .appointment-services-picker__option,
+.field .appointment-services-picker__option {
+    font-size: 13px;
+    line-height: 1.2;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--color-text);
+}
+
+.appointment-services-picker__option:hover {
+    background: var(--color-surface-soft);
+}
+
+.field .appointment-services-picker__option input {
+    flex: 0 0 auto;
+    width: 13px;
+    min-height: 13px;
+    height: 13px;
+    margin: 0;
+    padding: 0;
+    accent-color: var(--color-accent);
+}
+
 .appointment-create-panel .field--full {
     align-self: start;
     min-height: 0;

@@ -265,7 +265,7 @@ class Appointment(models.Model):
         CANCELLED = "cancelled", "Cancelada"
 
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="appointments")
-    service = models.ForeignKey(Service, on_delete=models.PROTECT, related_name="appointments")
+    services = models.ManyToManyField(Service, related_name="appointments")
     start_at = models.DateTimeField(db_index=True)
     end_at = models.DateTimeField()
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
@@ -284,7 +284,18 @@ class Appointment(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.client} - {self.service} @ {self.start_at:%Y-%m-%d %H:%M}"
+        return f"{self.client} - {self.services_label or 'Sin servicios'} @ {self.start_at:%Y-%m-%d %H:%M}"
+
+    @property
+    def services_label(self):
+        if not self.pk:
+            return ""
+        services = list(self.services.all())
+        if len(services) == 1:
+            return services[0].name
+        if len(services) > 1:
+            return "Varios servicios"
+        return ""
 
     @classmethod
     def active_statuses(cls):

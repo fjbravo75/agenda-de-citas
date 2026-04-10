@@ -204,7 +204,6 @@ class Command(BaseCommand):
             target_status = definition["status"]
             appointment = Appointment.objects.create(
                 client=clients[definition["client"]],
-                service=service,
                 start_at=start_at,
                 end_at=start_at + timedelta(minutes=service.duration_minutes),
                 status=(
@@ -214,6 +213,7 @@ class Command(BaseCommand):
                 ),
                 internal_notes=definition.get("internal_notes", ""),
             )
+            appointment.services.set([service])
             if target_status == Appointment.Status.CANCELLED:
                 appointment.status = Appointment.Status.CANCELLED
                 appointment.save()

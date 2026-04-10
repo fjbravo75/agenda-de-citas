@@ -313,8 +313,8 @@ def _build_entry_from_appointment(appointment, selected_day):
     return {
         "id": appointment.pk,
         "name": appointment.client.name,
-        "service": appointment.service.name,
-        "service_label": appointment.service.name,
+        "service": appointment.services_label,
+        "service_label": appointment.services_label,
         "status": appointment.get_status_display(),
         "status_key": appointment.status,
         "edit_url": f"{reverse('core:appointment_update', args=[appointment.pk])}?{edit_query}",
@@ -325,7 +325,8 @@ def _build_entry_from_appointment(appointment, selected_day):
 def _appointments_for_day(target_day):
     start_at, end_at = _day_bounds(target_day)
     return list(
-        Appointment.objects.select_related("client", "service")
+        Appointment.objects.select_related("client")
+        .prefetch_related("services")
         .filter(
             start_at__gte=start_at,
             start_at__lt=end_at,
@@ -1364,7 +1365,7 @@ class ClientDetailView(AppLoginRequiredMixin, TemplateView):
         fallback_url = reverse("core:app_entrypoint")
         history_items = []
 
-        appointments = client.appointments.select_related("service").order_by("-start_at", "-id")
+        appointments = client.appointments.prefetch_related("services").order_by("-start_at", "-id")
         for appointment in appointments:
             slot_day = appointment.slot_day
             edit_url = reverse("core:appointment_update", args=[appointment.pk])
@@ -1374,7 +1375,7 @@ class ClientDetailView(AppLoginRequiredMixin, TemplateView):
                 {
                     "date_label": _format_compact_day(slot_day) if slot_day is not None else "",
                     "slot_time": appointment.slot_time,
-                    "service_label": appointment.service.name,
+                    "service_label": appointment.services_label,
                     "status_label": appointment.get_status_display(),
                     "status_key": appointment.status,
                     "edit_url": edit_url,

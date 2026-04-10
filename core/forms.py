@@ -2,6 +2,7 @@ from datetime import datetime, time, timedelta
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.utils import timezone
 
 from .day_availability import DayAvailabilityResolver
@@ -109,7 +110,11 @@ class OfficialHolidaySyncForm(forms.Form):
 
 class AppointmentForm(forms.Form):
     client = forms.ModelChoiceField(queryset=Client.objects.none(), label="Cliente")
-    service = forms.ModelChoiceField(queryset=Service.objects.none(), label="Servicio")
+    services = forms.ModelMultipleChoiceField(
+        queryset=Service.objects.none(),
+        label="Servicios",
+        widget=forms.CheckboxSelectMultiple,
+    )
     day = forms.DateField(
         label="Fecha",
         widget=forms.DateInput(attrs={"type": "date"}),
@@ -136,9 +141,10 @@ class AppointmentForm(forms.Form):
         **kwargs,
     ):
         self.instance = instance or Appointment()
+        self._selected_services = []
         super().__init__(*args, **kwargs)
         self.fields["client"].queryset = Client.objects.order_by("name", "id")
-        self.fields["service"].queryset = Service.objects.order_by("name", "id")
+        self.fields["services"].queryset = self._services_queryset()
         self._configure_status_field()
         target_day = self._resolve_target_day(initial_day)
         self._configure_slot_field(target_day)
@@ -150,7 +156,7 @@ class AppointmentForm(forms.Form):
             self.initial.update(
                 {
                     "client": self.instance.client_id,
-                    "service": self.instance.service_id,
+                    "services": list(self.instance.services.values_list("pk", flat=True)),
                     "day": self.instance.slot_day,
                     "slot_time": self.instance.slot_time,
                     "status": self.instance.status,
@@ -188,6 +194,7 @@ class AppointmentForm(forms.Form):
 
     def save(self):
         self.instance.save()
+        self.instance.services.set(self._selected_services)
         return self.instance
 
     def _resolve_target_day(self, initial_day):
@@ -251,6 +258,14 @@ class AppointmentForm(forms.Form):
                 if choice[0] != Appointment.Status.CANCELLED
             ]
         self.fields["status"].choices = status_choices
+
+    def _services_queryset(self):
+        if self.instance.pk:
+            current_service_ids = self.instance.services.values_list("pk", flat=True)
+            return Service.objects.filter(
+                Q(is_active=True) | Q(pk__in=current_service_ids)
+            ).distinct().order_by("name", "id")
+        return Service.objects.active().order_by("name", "id")
 
     def _first_bookable_slot(self, target_day):
         day_availability = DayAvailabilityResolver.resolve_for_global_agenda(target_day)
@@ -317,26 +332,27 @@ class AppointmentForm(forms.Form):
 
     def _assign_instance_values(self, cleaned_data):
         client = cleaned_data.get("client")
-        service = cleaned_data.get("service")
+        services = list(cleaned_data.get("services") or [])
         day = cleaned_data.get("day")
         slot_time = cleaned_data.get("slot_time")
         status = cleaned_data.get("status")
         internal_notes = cleaned_data.get("internal_notes", "")
 
-        if not all([client, service, day, slot_time, status]):
+        if not all([client, services, day, slot_time, status]):
             return
 
         start_at = timezone.make_aware(
             datetime.combine(day, time.fromisoformat(slot_time)),
             timezone.get_current_timezone(),
         )
+        duration_minutes = max(service.duration_minutes for service in services)
 
         self.instance.client = client
-        self.instance.service = service
         self.instance.start_at = start_at
-        self.instance.end_at = start_at + timedelta(minutes=service.duration_minutes)
+        self.instance.end_at = start_at + timedelta(minutes=duration_minutes)
         self.instance.status = status
         self.instance.internal_notes = internal_notes
+        self._selected_services = services
 
     def _apply_model_errors(self, error):
         if hasattr(error, "error_dict"):

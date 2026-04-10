@@ -82,6 +82,8 @@
                                             {% endif %}
                                         </div>
                                     </div>
+                                    {% elif field.name == "services" %}
+                                    {% include "core/_appointment_services_field.html" with field=field %}
                                     {% else %}
                                     <div class="field{% if field.name == 'internal_notes' %} field--full{% endif %}">
                                         {{ field.label_tag }}

@@ -17,11 +17,15 @@ class ServiceAdmin(admin.ModelAdmin):
 
 @admin.register(Appointment)
 class AppointmentAdmin(admin.ModelAdmin):
-    list_display = ("start_at", "end_at", "status", "client", "service")
-    list_filter = ("status", "service")
-    search_fields = ("client__name", "service__name", "internal_notes")
-    autocomplete_fields = ("client", "service")
+    list_display = ("start_at", "end_at", "status", "client", "services_summary")
+    list_filter = ("status", "services")
+    search_fields = ("client__name", "services__name", "internal_notes")
+    autocomplete_fields = ("client", "services")
     date_hierarchy = "start_at"
+
+    @admin.display(description="Servicios")
+    def services_summary(self, obj):
+        return obj.services_label or "Sin servicios"
 
 
 @admin.register(AvailabilityBlock)

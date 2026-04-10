@@ -1,0 +1,30 @@
+<div class="field appointment-services-field{% if field_container_class %} {{ field_container_class }}{% endif %}" data-service-picker data-service-picker-placeholder="Servicios">
+    {{ field.label_tag }}
+    <div class="appointment-services-picker">
+        <button
+            class="appointment-services-picker__toggle"
+            type="button"
+            data-service-picker-toggle
+            aria-expanded="false"
+        >
+            <span data-service-picker-summary>Servicios</span>
+        </button>
+        <div class="appointment-services-picker__panel" data-service-picker-panel>
+            {% for choice in field %}
+            <label class="appointment-services-picker__option" data-service-picker-option data-service-name="{{ choice.choice_label }}">
+                {{ choice.tag }}
+                <span>{{ choice.choice_label }}</span>
+            </label>
+            {% empty %}
+            <p class="text-secondary">No hay servicios disponibles.</p>
+            {% endfor %}
+        </div>
+    </div>
+    {% if field.errors %}
+    <div class="field__feedback">
+        {% for error in field.errors %}
+        <p class="error-text">{{ error }}</p>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>

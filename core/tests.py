@@ -17,13 +17,19 @@ from .management.commands.sync_official_holidays import (
     OfficialHolidayImport,
     OfficialHolidaySyncResult,
 )
-from .forms import AgendaSettingsForm, ManualClosureForm, OfficialHolidaySyncForm
 from .day_availability import DayAvailabilityResolver
+from .forms import (
+    AgendaSettingsForm,
+    ManualClosureForm,
+    OfficialHolidaySyncForm,
+    ServiceForm,
+)
 from .models import (
     AgendaSettings,
     Appointment,
     AvailabilityBlock,
     Client,
+    DEFAULT_SERVICE_DURATION_MINUTES,
     ManualClosure,
     OfficialHoliday,
     Service,
@@ -724,6 +730,27 @@ class ManualClosureFormTests(TestCase):
         self.assertIn("solapa", str(form.non_field_errors()))
 
 
+class ServiceFormTests(TestCase):
+    def test_form_exposes_only_operational_catalog_fields(self):
+        form = ServiceForm(
+            data={
+                "name": "Primera consulta",
+                "description": "Sesion inicial para valorar el caso.",
+            }
+        )
+
+        self.assertTrue(form.is_valid())
+
+        service = form.save()
+
+        self.assertEqual(service.name, "Primera consulta")
+        self.assertEqual(service.description, "Sesion inicial para valorar el caso.")
+        self.assertTrue(service.is_active)
+        self.assertEqual(service.duration_minutes, DEFAULT_SERVICE_DURATION_MINUTES)
+        self.assertEqual(service.color, "")
+        self.assertEqual(list(form.fields), ["name", "description"])
+
+
 class OfficialHolidaySyncFormTests(TestCase):
     def test_form_requires_a_valid_year(self):
         form = OfficialHolidaySyncForm(data={"year": ""})
@@ -815,6 +842,13 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
 
         self._assert_redirects_to_login(response, requested_url)
 
+    def test_client_list_redirects_anonymous_user_to_wagtail_login(self):
+        requested_url = reverse("core:client_list")
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
     def test_ui_preview_redirects_anonymous_user_to_wagtail_login(self):
         requested_url = reverse("core:ui_preview")
 
@@ -831,6 +865,41 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
 
     def test_agenda_settings_redirects_anonymous_user_to_wagtail_login(self):
         requested_url = reverse("core:agenda_settings")
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_settings_index_redirects_anonymous_user_to_wagtail_login(self):
+        requested_url = reverse("core:settings_index")
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_service_settings_redirects_anonymous_user_to_wagtail_login(self):
+        requested_url = reverse("core:service_settings")
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_service_create_redirects_anonymous_user_to_wagtail_login(self):
+        requested_url = reverse("core:service_create")
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_service_update_redirects_anonymous_user_to_wagtail_login(self):
+        requested_url = reverse("core:service_update", args=[self.review_service.pk])
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
+    def test_service_delete_redirects_anonymous_user_to_wagtail_login(self):
+        requested_url = reverse("core:service_delete", args=[self.review_service.pk])
 
         response = self.client.get(requested_url)
 
@@ -918,6 +987,15 @@ class SessionAccessAndLoginBrandingTests(AgendaBaseTestCase):
         self.assertContains(response, self.app_user.username)
         self.assertContains(response, reverse("core:app_logout"))
         self.assertContains(response, "Cerrar sesion")
+        self.assertContains(response, f'href="{reverse("core:app_entrypoint")}"')
+        self.assertContains(response, f'href="{reverse("core:client_list")}"')
+        self.assertContains(response, f'href="{reverse("core:settings_index")}"')
+        self.assertContains(response, ">Agenda<")
+        self.assertContains(response, ">Clientes<")
+        self.assertContains(response, ">Ajustes<")
+        self.assertNotContains(response, "/app/ui/")
+        self.assertNotContains(response, "/app/calendar-ui/")
+        self.assertNotContains(response, ">CMS<")
 
     def test_app_logout_redirects_to_app_oriented_login_and_closes_session(self):
         self.login_app_user()
@@ -2281,6 +2359,29 @@ class ClientDetailViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertContains(response, f'href="{reverse("core:app_entrypoint")}"')
 
 
+class ClientListViewTests(AuthenticatedAgendaBaseTestCase):
+    def test_client_list_view_returns_200_and_renders_clients(self):
+        response = self.client.get(reverse("core:client_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/client_list.html")
+        self.assertContains(response, "Clientes")
+        self.assertContains(response, "Consulta clientes y accede a su historial de citas.")
+        self.assertContains(response, self.primary_client.name)
+        self.assertContains(response, self.secondary_client.name)
+        self.assertContains(response, reverse("core:client_detail", args=[self.primary_client.pk]))
+
+    def test_client_list_view_renders_empty_state_without_contextual_create_action(self):
+        Client.objects.all().delete()
+
+        response = self.client.get(reverse("core:client_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sin clientes")
+        self.assertContains(response, "Los clientes nuevos se crean desde el flujo de Nueva cita por ahora.")
+        self.assertNotContains(response, reverse("core:client_create"))
+
+
 class AppEntryPointViewTests(AuthenticatedAgendaBaseTestCase):
     def _day_context(self, response, target_day):
         for week in response.context["agenda_weeks"]:
@@ -2905,12 +3006,50 @@ class AppEntryPointViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertNotContains(response, response.context["selected_day_summary"])
 
 
+class SettingsIndexViewTests(AuthenticatedAgendaBaseTestCase):
+    def test_settings_index_groups_agenda_availability_and_services(self):
+        response = self.client.get(reverse("core:settings_index"))
+
+        agenda_settings_url = reverse("core:agenda_settings")
+        service_settings_url = reverse("core:service_settings")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/settings_index.html")
+        self.assertContains(response, "Ajustes")
+        self.assertContains(response, "Configura el funcionamiento de tu agenda y los servicios que ofreces.")
+        self.assertContains(response, 'class="section-surface settings-index__group"', count=2)
+        self.assertContains(response, "Agenda y disponibilidad")
+        self.assertContains(response, "Gestiona horarios, cierres y dias no operativos.")
+        self.assertContains(response, "Ajustes de agenda")
+        self.assertContains(response, f'href="{agenda_settings_url}"')
+        self.assertContains(response, f'href="{agenda_settings_url}#cierres-manuales"')
+        self.assertContains(response, f'href="{agenda_settings_url}#festivos-oficiales"')
+        self.assertContains(response, "Festivos sincronizados desde BOE en solo lectura.")
+        self.assertContains(response, "Servicios")
+        self.assertContains(response, "Define los servicios que puedes reservar en tu agenda.")
+        self.assertContains(response, "Gestiona el catalogo operativo de servicios.")
+        self.assertContains(response, f'href="{service_settings_url}"')
+        self.assertNotContains(response, 'class="settings-breadcrumbs"')
+        self.assertNotContains(response, "/app/ui/")
+        self.assertNotContains(response, "/app/calendar-ui/")
+
+
 class AgendaSettingsViewTests(AuthenticatedAgendaBaseTestCase):
     def test_settings_page_creates_singleton_and_renders_empty_states(self):
         response = self.client.get(reverse("core:agenda_settings"))
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "core/agenda_settings.html")
+        self.assertEqual(
+            response.context["settings_breadcrumbs"],
+            [
+                {"label": "Ajustes", "url": reverse("core:settings_index")},
+                {"label": "Agenda y disponibilidad", "url": ""},
+            ],
+        )
+        self.assertContains(response, 'class="settings-breadcrumbs"')
+        self.assertContains(response, f'href="{reverse("core:settings_index")}">Ajustes</a>')
+        self.assertContains(response, 'aria-current="page">Agenda y disponibilidad</span>')
         self.assertContains(response, "Ajustes de agenda")
         self.assertContains(response, "Reglas base de la agenda")
         self.assertContains(response, "parrilla fija de 8 tramos")
@@ -2941,8 +3080,12 @@ class AgendaSettingsViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertNotContains(response, "Limpiar ultimo fallo")
         self.assertNotContains(response, "Crear festivo")
         self.assertNotContains(response, "/app/settings/agenda/official-holidays/")
+        self.assertContains(response, 'id="agenda-reglas"')
+        self.assertContains(response, 'id="cierres-manuales"')
+        self.assertContains(response, 'id="festivos-oficiales"')
         self.assertContains(response, 'name="year"')
         self.assertContains(response, reverse("core:manual_closure_create"))
+        self.assertNotContains(response, "Volver a la agenda")
         self.assertEqual(AgendaSettings.objects.count(), 1)
 
     def test_settings_page_updates_global_singleton(self):

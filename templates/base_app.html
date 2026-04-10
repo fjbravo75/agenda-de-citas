@@ -16,11 +16,9 @@
         </a>
         <div class="header-row__secondary">
             <nav class="nav-cluster" aria-label="Navegacion interna">
-                <a class="nav-link{% if request.path == '/app/' %} is-active{% endif %}" href="/app/">Agenda</a>
-                <a class="nav-link{% if '/app/settings/agenda/' in request.path %} is-active{% endif %}" href="{% url 'core:agenda_settings' %}">Ajustes</a>
-                <a class="nav-link{% if request.path == '/app/ui/' %} is-active{% endif %}" href="/app/ui/">UI</a>
-                <a class="nav-link{% if request.path == '/app/calendar-ui/' %} is-active{% endif %}" href="/app/calendar-ui/">Mock</a>
-                <a class="nav-link" href="/">CMS</a>
+                <a class="nav-link{% if request.path == '/app/' %} is-active{% endif %}" href="{% url 'core:app_entrypoint' %}">Agenda</a>
+                <a class="nav-link{% if '/app/clients/' in request.path %} is-active{% endif %}" href="{% url 'core:client_list' %}">Clientes</a>
+                <a class="nav-link{% if '/app/settings/' in request.path %} is-active{% endif %}" href="{% url 'core:settings_index' %}">Ajustes</a>
             </nav>
             {% if request.user.is_authenticated %}
             <div class="session-chip" aria-label="Sesion actual">
@@ -45,16 +43,14 @@
 <footer class="site-footer site-footer--app">
     <div class="shell shell--app footer-row">
         <div class="footer-row__meta">
-            <p class="footer-title">Base visual compartida</p>
-            <p class="footer-copy">Base comun para CMS y app interna, con la agenda principal ya montada en fase estructural.</p>
+            <p class="footer-title">Agenda operativa</p>
+            <p class="footer-copy">Calendario, clientes y ajustes internos del negocio.</p>
         </div>
         <div class="footer-row__aside">
             <div class="footer-links">
-                <a class="footer-link" href="/app/">Agenda</a>
-                <a class="footer-link" href="{% url 'core:agenda_settings' %}">Ajustes</a>
-                <a class="footer-link" href="/app/ui/">UI</a>
-                <a class="footer-link" href="/app/calendar-ui/">Mock</a>
-                <a class="footer-link" href="/">CMS</a>
+                <a class="footer-link" href="{% url 'core:app_entrypoint' %}">Agenda</a>
+                <a class="footer-link" href="{% url 'core:client_list' %}">Clientes</a>
+                <a class="footer-link" href="{% url 'core:settings_index' %}">Ajustes</a>
             </div>
             <p class="footer-copy">Agenda de Citas {{ current_year }}</p>
         </div>

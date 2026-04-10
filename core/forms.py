@@ -85,6 +85,19 @@ class ManualClosureForm(forms.ModelForm):
         }
 
 
+class ServiceForm(forms.ModelForm):
+    class Meta:
+        model = Service
+        fields = ("name", "description")
+        labels = {
+            "name": "Nombre",
+            "description": "Descripcion",
+        }
+        widgets = {
+            "description": forms.Textarea(attrs={"rows": 4}),
+        }
+
+
 class OfficialHolidaySyncForm(forms.Form):
     year = forms.IntegerField(
         label="Año",

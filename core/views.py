@@ -23,6 +23,7 @@ from .forms import (
     ClientForm,
     ManualClosureForm,
     OfficialHolidaySyncForm,
+    ServiceForm,
 )
 from .management.commands.sync_official_holidays import BoeSyncError, import_boe_national_holidays
 from .models import (
@@ -33,6 +34,7 @@ from .models import (
     Client,
     ManualClosure,
     OfficialHoliday,
+    Service,
     agenda_assigned_slot_time,
     agenda_slot_operational_state_map,
 )
@@ -267,6 +269,21 @@ def _appointment_create_url_for_slot(target_day, slot_time, next_url=""):
 
 def _agenda_settings_url():
     return reverse("core:agenda_settings")
+
+
+def _settings_index_url():
+    return reverse("core:settings_index")
+
+
+def _service_settings_url():
+    return reverse("core:service_settings")
+
+
+def _settings_breadcrumbs(*items):
+    return [
+        {"label": "Ajustes", "url": _settings_index_url()},
+        *items,
+    ]
 
 
 def _empty_timeline_slots():
@@ -792,6 +809,53 @@ class AppEntryPointView(AppLoginRequiredMixin, TemplateView):
         return context
 
 
+class SettingsIndexView(AppLoginRequiredMixin, TemplateView):
+    template_name = "core/settings_index.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agenda_settings_url = _agenda_settings_url()
+        context.update(
+            {
+                "settings_groups": [
+                    {
+                        "title": "Agenda y disponibilidad",
+                        "description": "Gestiona horarios, cierres y dias no operativos.",
+                        "items": [
+                            {
+                                "label": "Ajustes de agenda",
+                                "description": "Reglas base de fines de semana y festivos.",
+                                "url": agenda_settings_url,
+                            },
+                            {
+                                "label": "Cierres manuales",
+                                "description": "Vacaciones, puentes y cierres completos del negocio.",
+                                "url": f"{agenda_settings_url}#cierres-manuales",
+                            },
+                            {
+                                "label": "Festivos oficiales",
+                                "description": "Festivos sincronizados desde BOE en solo lectura.",
+                                "url": f"{agenda_settings_url}#festivos-oficiales",
+                            },
+                        ],
+                    },
+                    {
+                        "title": "Servicios",
+                        "description": "Define los servicios que puedes reservar en tu agenda.",
+                        "items": [
+                            {
+                                "label": "Servicios",
+                                "description": "Gestiona el catalogo operativo de servicios.",
+                                "url": _service_settings_url(),
+                            },
+                        ],
+                    },
+                ],
+            }
+        )
+        return context
+
+
 class AgendaSettingsView(AppLoginRequiredMixin, FormView):
     template_name = "core/agenda_settings.html"
     form_class = AgendaSettingsForm
@@ -877,6 +941,9 @@ class AgendaSettingsView(AppLoginRequiredMixin, FormView):
                     " Aqui solo ajustas fines de semana, cierres completos y festivos oficiales."
                 ),
                 "back_url": reverse("core:app_entrypoint"),
+                "settings_breadcrumbs": _settings_breadcrumbs(
+                    {"label": "Agenda y disponibilidad", "url": ""},
+                ),
                 "manual_closures": self.get_manual_closures(),
                 "manual_closure_create_url": reverse("core:manual_closure_create"),
                 "official_holidays": self.get_official_holidays(),
@@ -1324,6 +1391,19 @@ class ClientDetailView(AppLoginRequiredMixin, TemplateView):
         return context
 
 
+class ClientListView(AppLoginRequiredMixin, TemplateView):
+    template_name = "core/client_list.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(
+            {
+                "clients": Client.objects.order_by("name", "id"),
+            }
+        )
+        return context
+
+
 class ClientCreateView(AppLoginRequiredMixin, FormView):
     template_name = "core/client_form.html"
     form_class = ClientForm
@@ -1389,6 +1469,105 @@ class ClientCreateView(AppLoginRequiredMixin, FormView):
     def form_valid(self, form):
         client = form.save()
         return HttpResponseRedirect(self.get_return_url(client_id=client.pk))
+
+
+class ServiceSettingsView(AppLoginRequiredMixin, TemplateView):
+    template_name = "core/service_settings.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(
+            {
+                "back_url": _settings_index_url(),
+                "settings_breadcrumbs": _settings_breadcrumbs(
+                    {"label": "Servicios", "url": ""},
+                ),
+                "services": Service.objects.active().order_by("name", "id"),
+                "service_create_url": reverse("core:service_create"),
+            }
+        )
+        return context
+
+
+class ServiceFormViewBase(AppLoginRequiredMixin, FormView):
+    template_name = "core/service_form.html"
+    form_class = ServiceForm
+
+    def get_service(self):
+        return None
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["instance"] = self.get_service()
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        service = self.get_service()
+        is_edit = service is not None
+        context.update(
+            {
+                "page_title": "Editar servicio" if is_edit else "Nuevo servicio",
+                "page_description": "Define el nombre y la descripcion visible de este servicio.",
+                "submit_label": "Guardar cambios" if is_edit else "Crear servicio",
+                "back_url": _service_settings_url(),
+                "is_edit": is_edit,
+                "settings_breadcrumbs": _settings_breadcrumbs(
+                    {"label": "Servicios", "url": _service_settings_url()},
+                    {"label": "Editar servicio" if is_edit else "Nuevo servicio", "url": ""},
+                ),
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        service = form.save(commit=False)
+        service.is_active = True
+        service.save()
+        return HttpResponseRedirect(_service_settings_url())
+
+
+class ServiceCreateView(ServiceFormViewBase):
+    pass
+
+
+class ServiceUpdateView(ServiceFormViewBase):
+    def get_service(self):
+        if not hasattr(self, "_service"):
+            self._service = get_object_or_404(Service, pk=self.kwargs["pk"], is_active=True)
+        return self._service
+
+
+class ServiceDeleteView(AppLoginRequiredMixin, TemplateView):
+    template_name = "core/service_confirm_delete.html"
+
+    def get_service(self):
+        if not hasattr(self, "_service"):
+            self._service = get_object_or_404(Service, pk=self.kwargs["pk"], is_active=True)
+        return self._service
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        service = self.get_service()
+        context.update(
+            {
+                "page_title": "Eliminar servicio",
+                "page_description": "Retira este servicio del catalogo operativo para nuevas citas.",
+                "service": service,
+                "back_url": _service_settings_url(),
+                "settings_breadcrumbs": _settings_breadcrumbs(
+                    {"label": "Servicios", "url": _service_settings_url()},
+                    {"label": "Eliminar servicio", "url": ""},
+                ),
+            }
+        )
+        return context
+
+    def post(self, request, *args, **kwargs):
+        service = self.get_service()
+        service.is_active = False
+        service.save(update_fields=["is_active"])
+        return HttpResponseRedirect(_service_settings_url())
 
 
 class UIValidationView(AppLoginRequiredMixin, TemplateView):

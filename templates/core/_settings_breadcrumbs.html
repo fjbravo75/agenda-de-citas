@@ -1,0 +1,14 @@
+{% if settings_breadcrumbs %}
+<nav class="settings-breadcrumbs" aria-label="Ruta de ajustes">
+    {% for crumb in settings_breadcrumbs %}
+    {% if not forloop.first %}
+    <span class="settings-breadcrumbs__separator" aria-hidden="true">/</span>
+    {% endif %}
+    {% if crumb.url and not forloop.last %}
+    <a class="settings-breadcrumbs__item" href="{{ crumb.url }}">{{ crumb.label }}</a>
+    {% else %}
+    <span class="settings-breadcrumbs__item settings-breadcrumbs__item--current"{% if forloop.last %} aria-current="page"{% endif %}>{{ crumb.label }}</span>
+    {% endif %}
+    {% endfor %}
+</nav>
+{% endif %}

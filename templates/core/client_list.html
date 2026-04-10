@@ -1,0 +1,50 @@
+{% extends "base_app.html" %}
+
+{% block title %}Clientes | Agenda de Citas{% endblock %}
+
+{% block body_class %}theme-root theme-app app-client-screen{% endblock %}
+
+{% block content %}
+<section class="section-stack">
+    <header class="page-header">
+        <div class="page-header__copy">
+            <h1>Clientes</h1>
+            <p class="text-secondary">Consulta clientes y accede a su historial de citas.</p>
+        </div>
+    </header>
+</section>
+
+<section class="section-stack">
+    <article class="section-surface">
+        {% if clients %}
+        <div class="table-wrap">
+            <table class="table table--compact">
+                <thead>
+                    <tr>
+                        <th>Cliente</th>
+                        <th>Telefono</th>
+                        <th>Email</th>
+                        <th>Accion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for client in clients %}
+                    <tr>
+                        <td><strong>{{ client.name }}</strong></td>
+                        <td>{{ client.phone|default:"-" }}</td>
+                        <td>{{ client.email|default:"-" }}</td>
+                        <td><a href="{% url 'core:client_detail' client.pk %}">Ver ficha</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p class="empty-state__icon">Sin clientes</p>
+            <p class="text-secondary">Los clientes nuevos se crean desde el flujo de Nueva cita por ahora.</p>
+        </div>
+        {% endif %}
+    </article>
+</section>
+{% endblock %}

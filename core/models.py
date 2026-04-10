@@ -16,6 +16,7 @@ AGENDA_SLOT_TIMES = ("09:00", "10:00", "11:00", "12:00", "13:00", "16:00", "17:0
 AGENDA_SLOT_TIME_CHOICES = tuple((slot_time, slot_time) for slot_time in AGENDA_SLOT_TIMES)
 AGENDA_SLOT_VALUES = tuple(time.fromisoformat(slot_time) for slot_time in AGENDA_SLOT_TIMES)
 DEFAULT_SLOT_CAPACITY = 3
+DEFAULT_SERVICE_DURATION_MINUTES = 30
 
 
 class AgendaSettings(models.Model):
@@ -233,10 +234,22 @@ class Client(models.Model):
         return self.name
 
 
+class ServiceQuerySet(models.QuerySet):
+    def active(self):
+        return self.filter(is_active=True)
+
+
 class Service(models.Model):
     name = models.CharField(max_length=120)
-    duration_minutes = models.PositiveIntegerField(validators=[MinValueValidator(5)])
+    description = models.TextField(blank=True)
+    duration_minutes = models.PositiveIntegerField(
+        default=DEFAULT_SERVICE_DURATION_MINUTES,
+        validators=[MinValueValidator(5)],
+    )
     color = models.CharField(max_length=7, blank=True, validators=[HEX_COLOR_VALIDATOR])
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    objects = ServiceQuerySet.as_manager()
 
     class Meta:
         ordering = ("name", "id")

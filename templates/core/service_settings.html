@@ -1,0 +1,54 @@
+{% extends "base_app.html" %}
+
+{% block title %}Servicios | Agenda de Citas{% endblock %}
+
+{% block body_class %}theme-root theme-app app-settings-screen{% endblock %}
+
+{% block content %}
+<section class="section-stack">
+    <header class="page-header">
+        <div class="page-header__copy">
+            {% include "core/_settings_breadcrumbs.html" %}
+            <h1>Servicios</h1>
+            <p class="text-secondary">Define los servicios que puedes reservar en tu agenda.</p>
+        </div>
+        <div class="page-actions">
+            <a class="button button--primary" href="{{ service_create_url }}">Nuevo servicio</a>
+        </div>
+    </header>
+</section>
+
+<section class="section-stack">
+    <article class="section-surface">
+        <div class="stack-sm">
+            <h2>Catalogo operativo</h2>
+            <p class="text-secondary">
+                Estos servicios estan disponibles para nuevas citas. Al eliminarlos, dejan de aparecer en el catalogo sin borrar el historico.
+            </p>
+        </div>
+
+        {% if services %}
+        <div class="service-catalog__list">
+            {% for service in services %}
+            <div class="service-catalog__item">
+                <div class="service-catalog__copy">
+                    <strong>{{ service.name }}</strong>
+                    <span>{{ service.description|default:"Sin descripcion" }}</span>
+                </div>
+                <div class="page-actions service-catalog__actions">
+                    <a class="button button--secondary" href="{% url 'core:service_update' service.pk %}">Editar</a>
+                    <a class="button button--ghost" href="{% url 'core:service_delete' service.pk %}">Eliminar</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p class="empty-state__icon">Sin servicios</p>
+            <p class="text-secondary">Todavia no hay servicios disponibles para reservar en la agenda.</p>
+            <a class="button button--primary" href="{{ service_create_url }}">Crear primer servicio</a>
+        </div>
+        {% endif %}
+    </article>
+</section>
+{% endblock %}

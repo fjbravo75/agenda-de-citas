@@ -8,11 +8,9 @@
 <section class="section-stack">
     <header class="page-header">
         <div class="page-header__copy">
+            {% include "core/_settings_breadcrumbs.html" %}
             <h1>{{ page_title }}</h1>
             <p class="text-secondary">{{ page_description }}</p>
-        </div>
-        <div class="page-actions">
-            <a class="button button--secondary" href="{{ back_url }}">Volver a la agenda</a>
         </div>
     </header>
 </section>
@@ -27,7 +25,7 @@
 </section>
 {% endif %}
 
-<section class="section-stack">
+<section id="agenda-reglas" class="section-stack">
     <article class="section-surface">
         <div class="stack-sm">
             <p class="eyebrow">Configuracion global</p>
@@ -79,7 +77,7 @@
     </article>
 </section>
 
-<section class="section-stack">
+<section id="cierres-manuales" class="section-stack">
     <article class="section-surface">
         <div class="page-header">
             <div class="page-header__copy">
@@ -138,7 +136,7 @@
     </article>
 </section>
 
-<section class="section-stack">
+<section id="festivos-oficiales" class="section-stack">
     <article class="section-surface">
         <div class="page-header">
             <div class="page-header__copy">

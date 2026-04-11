@@ -6,11 +6,34 @@
 <section class="section-stack">
     <header class="page-header">
         <div class="page-header__copy">
-            <p class="eyebrow">Cliente</p>
-            <h1>{{ client_obj.name }}</h1>
+            {% if client_breadcrumbs %}
+            <nav class="settings-breadcrumbs" aria-label="Ruta de clientes">
+                {% for crumb in client_breadcrumbs %}
+                {% if not forloop.first %}
+                <span class="settings-breadcrumbs__separator" aria-hidden="true">/</span>
+                {% endif %}
+                {% if crumb.url and not forloop.last %}
+                <a class="settings-breadcrumbs__item" href="{{ crumb.url }}">{{ crumb.label }}</a>
+                {% else %}
+                <span class="settings-breadcrumbs__item settings-breadcrumbs__item--current"{% if forloop.last %} aria-current="page"{% endif %}>{{ crumb.label }}</span>
+                {% endif %}
+                {% endfor %}
+            </nav>
+            {% endif %}
+            <h1 class="client-title">
+                <span>{{ client_obj.name }}</span>
+                {% if client_obj.is_archived %}
+                <span class="badge badge--archived client-title__badge">Archivado</span>
+                {% endif %}
+            </h1>
             <p class="text-secondary">Ficha minima de apoyo con datos base e historial de citas.</p>
         </div>
         <div class="page-actions">
+            {% if not client_obj.is_archived %}
+            <a class="button button--primary" href="{{ appointment_create_url }}">Nueva cita</a>
+            <a class="button button--secondary" href="{{ client_update_url }}">Editar cliente</a>
+            <a class="button button--danger" href="{{ client_archive_url }}">Archivar cliente</a>
+            {% endif %}
             <a class="button button--secondary" href="{{ back_url }}">Volver</a>
         </div>
     </header>
@@ -59,7 +82,9 @@
                             <th>Tramo</th>
                             <th>Servicio</th>
                             <th>Estado</th>
+                            {% if not client_obj.is_archived %}
                             <th>Accion</th>
+                            {% endif %}
                         </tr>
                     </thead>
                     <tbody>
@@ -69,7 +94,15 @@
                             <td>{{ item.slot_time }}</td>
                             <td>{{ item.service_label }}</td>
                             <td><span class="badge badge--{{ item.status_key }}">{{ item.status_label }}</span></td>
-                            <td><a href="{{ item.edit_url }}">Editar cita</a></td>
+                            {% if not client_obj.is_archived %}
+                            <td>
+                                {% if item.can_edit %}
+                                <a href="{{ item.edit_url }}">Editar cita</a>
+                                {% else %}
+                                <span class="text-secondary">Sin accion operativa</span>
+                                {% endif %}
+                            </td>
+                            {% endif %}
                         </tr>
                         {% endfor %}
                     </tbody>

@@ -1,0 +1,51 @@
+{% extends "base_app.html" %}
+
+{% block title %}{{ page_title }} | Agenda de Citas{% endblock %}
+
+{% block body_class %}theme-root theme-app app-client-screen{% endblock %}
+
+{% block content %}
+<section class="section-stack">
+    <header class="page-header">
+        <div class="page-header__copy">
+            {% if client_breadcrumbs %}
+            <nav class="settings-breadcrumbs" aria-label="Ruta de clientes">
+                {% for crumb in client_breadcrumbs %}
+                {% if not forloop.first %}
+                <span class="settings-breadcrumbs__separator" aria-hidden="true">/</span>
+                {% endif %}
+                {% if crumb.url and not forloop.last %}
+                <a class="settings-breadcrumbs__item" href="{{ crumb.url }}">{{ crumb.label }}</a>
+                {% else %}
+                <span class="settings-breadcrumbs__item settings-breadcrumbs__item--current"{% if forloop.last %} aria-current="page"{% endif %}>{{ crumb.label }}</span>
+                {% endif %}
+                {% endfor %}
+            </nav>
+            {% endif %}
+            <h1>{{ page_title }}</h1>
+            <p class="text-secondary">{{ page_description }}</p>
+        </div>
+        <div class="page-actions">
+            <a class="button button--secondary" href="{{ back_url }}">Volver a archivados</a>
+        </div>
+    </header>
+</section>
+
+<section class="section-stack">
+    <article class="section-surface">
+        <div class="alert alert--info">
+            <p>Este cliente volvera al listado activo y a la operativa normal de clientes.</p>
+        </div>
+
+        <div class="stack-sm">
+            <p><strong>{{ client_obj.name }}</strong></p>
+        </div>
+
+        <form method="post" class="page-actions">
+            {% csrf_token %}
+            <button class="button button--primary" type="submit">Confirmar reactivacion</button>
+            <a class="button button--secondary" href="{{ back_url }}">Cancelar</a>
+        </form>
+    </article>
+</section>
+{% endblock %}

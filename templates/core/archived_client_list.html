@@ -1,6 +1,6 @@
 {% extends "base_app.html" %}
 
-{% block title %}Clientes | Agenda de Citas{% endblock %}
+{% block title %}{{ page_title }} | Agenda de Citas{% endblock %}
 
 {% block body_class %}theme-root theme-app app-client-screen{% endblock %}
 
@@ -22,38 +22,47 @@
                 {% endfor %}
             </nav>
             {% endif %}
-            <h1>Clientes</h1>
-            <p class="text-secondary">Consulta clientes, accede a su historial y da de alta nuevos clientes.</p>
+            <h1>{{ page_title }}</h1>
+            <p class="text-secondary">{{ page_description }}</p>
         </div>
         <div class="page-actions">
-            <a class="button button--secondary" href="{{ archived_client_list_url }}">Clientes archivados</a>
-            <a class="button button--primary" href="{{ client_create_url }}">Nuevo cliente</a>
+            <a class="button button--secondary" href="{{ back_url }}">Volver a clientes</a>
         </div>
     </header>
 </section>
 
 <section class="section-stack">
     <article class="section-surface">
-        {% if clients %}
+        {% if archived_clients %}
         <div class="table-wrap">
             <table class="table table--compact">
                 <thead>
                     <tr>
                         <th>Cliente</th>
-                        <th>Proxima cita</th>
                         <th>Telefono</th>
                         <th>Email</th>
+                        <th>Historial</th>
                         <th>Accion</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for client in clients %}
+                    {% for client in archived_clients %}
                     <tr>
                         <td><strong>{{ client.name }}</strong></td>
-                        <td>{{ client.next_appointment_label }}</td>
                         <td>{{ client.phone|default:"-" }}</td>
                         <td>{{ client.email|default:"-" }}</td>
-                        <td><a href="{{ client.appointment_create_url }}">Nueva cita</a> · <a href="{{ client.detail_url }}">Ver ficha</a></td>
+                        <td>
+                            {% if client.appointment_count %}
+                            {{ client.appointment_count }} citas vinculadas
+                            {% else %}
+                            Sin citas vinculadas
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ client.detail_url }}">Ver ficha</a>
+                            · <a href="{{ client.reactivate_url }}">Reactivar</a>
+                            · <a href="{{ client.delete_url }}">Eliminar definitivamente</a>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -61,8 +70,8 @@
         </div>
         {% else %}
         <div class="empty-state">
-            <p class="empty-state__icon">Sin clientes</p>
-            <p class="text-secondary">Todavia no hay clientes registrados. Puedes crear el primero desde esta pantalla.</p>
+            <p class="empty-state__icon">Archivados</p>
+            <p class="text-secondary">Todavia no hay clientes archivados.</p>
         </div>
         {% endif %}
     </article>

@@ -327,6 +327,12 @@ h3 {
     background: var(--color-danger-soft);
 }
 
+.badge--archived {
+    color: var(--color-text-muted);
+    background: var(--color-surface-muted);
+    border-color: var(--color-line-strong);
+}
+
 .badge--completed {
     color: var(--color-success);
     background: var(--color-success-soft);
@@ -335,6 +341,22 @@ h3 {
 .badge--missed {
     color: #7a4c7d;
     background: #f5eef7;
+}
+
+.client-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.client-title__badge {
+    min-height: 24px;
+    height: 24px;
+    padding: 0 12px;
+    font-size: 12px;
+    line-height: 1;
+    letter-spacing: 0.01em;
 }
 
 .hero-block {

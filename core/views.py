@@ -1,11 +1,11 @@
 from calendar import Calendar, monthrange
 from datetime import date, datetime, time, timedelta
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import requests
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.db.models.functions import TruncDate
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
@@ -170,6 +170,19 @@ def _format_compact_day(target_day):
     return f"{target_day.day} {MONTH_NAMES[target_day.month]} {target_day.year}"
 
 
+def _format_next_appointment_label(appointment):
+    if appointment is None:
+        return "Sin proxima cita"
+
+    slot_day = appointment.slot_day
+    slot_time = appointment.slot_time
+    if slot_day is None:
+        return "Sin proxima cita"
+    if not slot_time:
+        return _format_compact_day(slot_day)
+    return f"{_format_compact_day(slot_day)} · {slot_time}"
+
+
 def _parse_iso_day(raw_day):
     if not raw_day:
         return None
@@ -206,6 +219,19 @@ def _url_with_next(base_url, next_url):
         return base_url
     separator = "&" if "?" in base_url else "?"
     return f"{base_url}{separator}{urlencode({'next': next_url})}"
+
+
+def _client_detail_navigation_url(client, next_url=""):
+    detail_url = reverse("core:client_detail", args=[client.pk])
+    if next_url and next_url.startswith(detail_url):
+        return next_url
+    return _url_with_next(detail_url, next_url)
+
+
+def _url_path(raw_url):
+    if not raw_url:
+        return ""
+    return urlsplit(raw_url).path
 
 
 def _appointment_create_url(target_day=None, slot_time="", next_url="", client_id=None):
@@ -279,9 +305,20 @@ def _service_settings_url():
     return reverse("core:service_settings")
 
 
+def _archived_client_list_url():
+    return reverse("core:archived_client_list")
+
+
 def _settings_breadcrumbs(*items):
     return [
         {"label": "Ajustes", "url": _settings_index_url()},
+        *items,
+    ]
+
+
+def _client_breadcrumbs(*items):
+    return [
+        {"label": "Clientes", "url": reverse("core:client_list")},
         *items,
     ]
 
@@ -517,41 +554,34 @@ def _build_day_panel(selected_day, return_url="", agenda_settings=None):
     }
 
 
-def _cancelled_appointments_count_for_day(target_day):
-    start_at, end_at = _day_bounds(target_day)
-    return Appointment.objects.filter(
-        start_at__gte=start_at,
-        start_at__lt=end_at,
-        status=Appointment.Status.CANCELLED,
-    ).count()
+def _build_agenda_metrics(timeline_slots):
+    active_entries = 0
+    pending_entries = 0
+    confirmed_entries = 0
+    free_slots = 0
 
+    for slot in timeline_slots:
+        if slot["can_book"]:
+            free_slots += 1
 
-def _build_agenda_metrics(timeline_slots, selected_day):
-    active_entries = sum(
-        1
-        for slot in timeline_slots
-        for entry in slot["entries"]
-        if entry["status_key"] in ACTIVE_CALENDAR_STATUS_KEYS
-    )
-    occupied_slots = sum(1 for slot in timeline_slots if slot["entries"])
-    confirmed_entries = sum(
-        1
-        for slot in timeline_slots
-        for entry in slot["entries"]
-        if entry["status_key"] == Appointment.Status.CONFIRMED
-    )
-    cancelled_entries = _cancelled_appointments_count_for_day(selected_day)
+        for entry in slot["entries"]:
+            if entry["status_key"] in ACTIVE_CALENDAR_STATUS_KEYS:
+                active_entries += 1
+            if entry["status_key"] == Appointment.Status.PENDING:
+                pending_entries += 1
+            elif entry["status_key"] == Appointment.Status.CONFIRMED:
+                confirmed_entries += 1
 
     return [
         {
             "label": "Citas activas",
             "value": f"{active_entries:02d}",
-            "meta": "pendientes y confirmadas del día",
+            "meta": "ocupan agenda ese dia",
         },
         {
-            "label": "Tramos con citas",
-            "value": f"{occupied_slots:02d}",
-            "meta": "tramos ocupados del día",
+            "label": "Pendientes",
+            "value": f"{pending_entries:02d}",
+            "meta": "citas por confirmar",
         },
         {
             "label": "Confirmadas",
@@ -559,9 +589,9 @@ def _build_agenda_metrics(timeline_slots, selected_day):
             "meta": "citas ya confirmadas",
         },
         {
-            "label": "Canceladas",
-            "value": f"{cancelled_entries:02d}",
-            "meta": "sin ocupar tramo activo",
+            "label": "Huecos libres",
+            "value": f"{free_slots:02d}",
+            "meta": "tramos donde aun puedes citar",
         },
     ]
 
@@ -782,7 +812,6 @@ class AppEntryPointView(AppLoginRequiredMixin, TemplateView):
             return_url=self.request.get_full_path(),
             agenda_settings=agenda_settings,
         )
-        today_panel = _build_day_panel(real_today, agenda_settings=agenda_settings)
         month_summary = _month_summary(
             visible_year,
             visible_month,
@@ -802,7 +831,7 @@ class AppEntryPointView(AppLoginRequiredMixin, TemplateView):
         )
         context.update(
             {
-                "agenda_metrics": _build_agenda_metrics(today_panel["agenda_timeline_slots"], selected_day),
+                "agenda_metrics": _build_agenda_metrics(day_panel["agenda_timeline_slots"]),
                 "today_context_label": _format_today_context_label(real_today),
             }
         )
@@ -1137,11 +1166,23 @@ class AppointmentFormViewBase(AppLoginRequiredMixin, FormView):
         raw_client_id = self.request.GET.get("client", "").strip()
         return raw_client_id or None
 
+    def get_back_label(self, back_url):
+        if _url_path(back_url) == reverse("core:client_list"):
+            return "Volver a clientes"
+
+        appointment = self.get_appointment()
+        client_id = appointment.client_id if appointment is not None else self.get_initial_client_id()
+        if client_id and _url_path(back_url) == reverse("core:client_detail", args=[client_id]):
+            return "Volver a ficha"
+
+        return "Volver a la agenda"
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         appointment = self.get_appointment()
         selected_day = self.get_selected_day()
         is_edit = appointment is not None
+        back_url = _safe_next_url(self.request) or _agenda_url_for_day(selected_day)
         client_detail_url = ""
         if appointment is not None and appointment.client_id:
             client_detail_url = _url_with_next(
@@ -1156,7 +1197,8 @@ class AppointmentFormViewBase(AppLoginRequiredMixin, FormView):
                     " operativas del dia, los bloqueos y la capacidad real del tramo."
                 ),
                 "submit_label": "Guardar cambios" if is_edit else "Guardar cita",
-                "back_url": _safe_next_url(self.request) or _agenda_url_for_day(selected_day),
+                "back_url": back_url,
+                "back_label": self.get_back_label(back_url),
                 "client_detail_url": client_detail_url,
                 "is_edit": is_edit,
             }
@@ -1212,7 +1254,10 @@ class AppointmentUpdateView(AppointmentFormViewBase):
 
     def get_appointment(self):
         if not hasattr(self, "_appointment"):
-            self._appointment = get_object_or_404(Appointment, pk=self.kwargs["pk"])
+            self._appointment = get_object_or_404(
+                Appointment.objects.exclude(status=Appointment.Status.CANCELLED),
+                pk=self.kwargs["pk"],
+            )
         return self._appointment
 
     def get_selected_day(self):
@@ -1361,16 +1406,20 @@ class ClientDetailView(AppLoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         client = self.get_client()
+        current_url = self.request.get_full_path()
         next_url = _safe_next_url(self.request)
-        fallback_url = reverse("core:app_entrypoint")
+        fallback_url = _archived_client_list_url() if client.is_archived else reverse("core:app_entrypoint")
         history_items = []
 
         appointments = client.appointments.prefetch_related("services").order_by("-start_at", "-id")
         for appointment in appointments:
             slot_day = appointment.slot_day
-            edit_url = reverse("core:appointment_update", args=[appointment.pk])
-            if slot_day is not None:
-                edit_url = f"{edit_url}?{_query_string(slot_day.year, slot_day.month, slot_day.day)}"
+            can_edit = (not client.is_archived) and appointment.status != Appointment.Status.CANCELLED
+            edit_url = ""
+            if can_edit:
+                edit_url = reverse("core:appointment_update", args=[appointment.pk])
+                if slot_day is not None:
+                    edit_url = f"{edit_url}?{_query_string(slot_day.year, slot_day.month, slot_day.day)}"
             history_items.append(
                 {
                     "date_label": _format_compact_day(slot_day) if slot_day is not None else "",
@@ -1378,6 +1427,7 @@ class ClientDetailView(AppLoginRequiredMixin, TemplateView):
                     "service_label": appointment.services_label,
                     "status_label": appointment.get_status_display(),
                     "status_key": appointment.status,
+                    "can_edit": can_edit,
                     "edit_url": edit_url,
                 }
             )
@@ -1386,6 +1436,41 @@ class ClientDetailView(AppLoginRequiredMixin, TemplateView):
             {
                 "client_obj": client,
                 "client_history": history_items,
+                "client_breadcrumbs": (
+                    _client_breadcrumbs(
+                        {"label": "Clientes archivados", "url": _archived_client_list_url()},
+                        {"label": client.name, "url": ""},
+                    )
+                    if client.is_archived
+                    else _client_breadcrumbs(
+                        {"label": client.name, "url": ""}
+                    )
+                ),
+                "appointment_create_url": (
+                    _appointment_create_url(
+                        next_url=current_url,
+                        client_id=client.pk,
+                    )
+                    if not client.is_archived
+                    else ""
+                ),
+                "client_update_url": (
+                    _url_with_next(
+                        reverse("core:client_update", args=[client.pk]),
+                        current_url,
+                    )
+                    if not client.is_archived
+                    else ""
+                ),
+                "client_archive_url": (
+                    _url_with_next(
+                        reverse("core:client_archive", args=[client.pk]),
+                        current_url,
+                    )
+                    if not client.is_archived
+                    else ""
+                ),
+                "archived_client_list_url": _archived_client_list_url(),
                 "back_url": next_url or fallback_url,
             }
         )
@@ -1397,9 +1482,44 @@ class ClientListView(AppLoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        current_url = self.request.get_full_path()
+        future_appointments = Prefetch(
+            "appointments",
+            queryset=Appointment.objects.filter(
+                start_at__gte=timezone.now(),
+                status__in=Appointment.active_statuses(),
+            ).order_by("start_at", "id"),
+            to_attr="future_active_appointments",
+        )
+        clients = list(
+            Client.objects.active().order_by("name", "id").prefetch_related(future_appointments)
+        )
+
+        for client in clients:
+            next_appointment = (
+                client.future_active_appointments[0]
+                if client.future_active_appointments
+                else None
+            )
+            client.next_appointment_label = _format_next_appointment_label(next_appointment)
+            client.detail_url = _url_with_next(
+                reverse("core:client_detail", args=[client.pk]),
+                current_url,
+            )
+            client.appointment_create_url = _appointment_create_url(
+                next_url=current_url,
+                client_id=client.pk,
+            )
+
         context.update(
             {
-                "clients": Client.objects.order_by("name", "id"),
+                "clients": clients,
+                "client_breadcrumbs": _client_breadcrumbs(),
+                "client_create_url": _url_with_next(
+                    reverse("core:client_create"),
+                    reverse("core:client_list"),
+                ),
+                "archived_client_list_url": _archived_client_list_url(),
             }
         )
         return context
@@ -1431,7 +1551,15 @@ class ClientCreateView(AppLoginRequiredMixin, FormView):
     def get_appointment_next_url(self):
         return _safe_appointment_next_url(self.request)
 
+    def get_next_url(self):
+        return _safe_next_url(self.request)
+
+    def has_appointment_context(self):
+        return bool(self.get_appointment_next_url())
+
     def get_return_url(self, client_id=None):
+        if not self.has_appointment_context():
+            return self.get_next_url() or reverse("core:client_list")
         return _appointment_create_url(
             target_day=self.get_selected_day(),
             slot_time=self.get_slot_time(),
@@ -1444,32 +1572,257 @@ class ClientCreateView(AppLoginRequiredMixin, FormView):
         selected_day = self.get_selected_day()
         slot_time = self.get_slot_time()
         appointment_context_label = ""
+        has_appointment_context = self.has_appointment_context()
 
-        if selected_day is not None:
+        if has_appointment_context and selected_day is not None:
             appointment_context_label = _format_day_title(selected_day)
             if slot_time:
                 appointment_context_label = f"{appointment_context_label} · {slot_time}"
-        elif slot_time:
+        elif has_appointment_context and slot_time:
             appointment_context_label = f"Tramo {slot_time}"
 
         context.update(
             {
                 "page_title": "Nuevo cliente",
-                "page_description": "Da de alta al cliente y vuelve al flujo de Nueva cita.",
+                "page_description": (
+                    "Da de alta al cliente y vuelve al flujo de Nueva cita."
+                    if has_appointment_context
+                    else "Da de alta al cliente y sigue trabajando desde Clientes."
+                ),
+                "client_breadcrumbs": _client_breadcrumbs(
+                    {"label": "Nuevo cliente", "url": ""}
+                ),
                 "back_url": self.get_return_url(),
+                "back_label": (
+                    "Volver a Nueva cita"
+                    if has_appointment_context
+                    else "Volver a clientes"
+                ),
                 "appointment_context_label": appointment_context_label,
                 "return_year": selected_day.year if selected_day is not None else "",
                 "return_month": selected_day.month if selected_day is not None else "",
                 "return_day": selected_day.day if selected_day is not None else "",
                 "return_slot_time": slot_time,
                 "appointment_next_url": self.get_appointment_next_url(),
+                "next_url": self.get_next_url(),
+                "submit_label": "Guardar cliente",
             }
         )
         return context
 
     def form_valid(self, form):
         client = form.save()
-        return HttpResponseRedirect(self.get_return_url(client_id=client.pk))
+        if self.has_appointment_context():
+            return HttpResponseRedirect(self.get_return_url(client_id=client.pk))
+        return HttpResponseRedirect(
+            _url_with_next(
+                reverse("core:client_detail", args=[client.pk]),
+                self.get_return_url(),
+            )
+        )
+
+
+class ClientUpdateView(AppLoginRequiredMixin, FormView):
+    template_name = "core/client_form.html"
+    form_class = ClientForm
+
+    def get_client(self):
+        if not hasattr(self, "_client"):
+            self._client = get_object_or_404(Client.objects.active(), pk=self.kwargs["pk"])
+        return self._client
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["instance"] = self.get_client()
+        return kwargs
+
+    def get_success_url(self):
+        next_url = _safe_next_url(self.request)
+        if next_url:
+            return next_url
+        return reverse("core:client_detail", args=[self.get_client().pk])
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        client = self.get_client()
+        next_url = _safe_next_url(self.request)
+        client_detail_url = _client_detail_navigation_url(client, next_url)
+        context.update(
+            {
+                "page_title": "Editar cliente",
+                "page_description": "Actualiza los datos base del cliente sin salir de la operativa.",
+                "client_breadcrumbs": _client_breadcrumbs(
+                    {"label": client.name, "url": client_detail_url},
+                    {"label": "Editar", "url": ""},
+                ),
+                "back_url": next_url or reverse("core:client_detail", args=[client.pk]),
+                "back_label": "Volver a ficha",
+                "appointment_context_label": "",
+                "return_year": "",
+                "return_month": "",
+                "return_day": "",
+                "return_slot_time": "",
+                "appointment_next_url": "",
+                "next_url": next_url,
+                "submit_label": "Guardar cambios",
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        form.save()
+        return HttpResponseRedirect(self.get_success_url())
+
+
+class ArchivedClientListView(AppLoginRequiredMixin, TemplateView):
+    template_name = "core/archived_client_list.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        current_url = self.request.get_full_path()
+        archived_clients = list(
+            Client.objects.archived().annotate(appointment_count=Count("appointments")).order_by("name", "id")
+        )
+        for client in archived_clients:
+            client.detail_url = _url_with_next(
+                reverse("core:client_detail", args=[client.pk]),
+                current_url,
+            )
+            client.reactivate_url = _url_with_next(
+                reverse("core:client_reactivate", args=[client.pk]),
+                current_url,
+            )
+            client.delete_url = _url_with_next(
+                reverse("core:client_delete", args=[client.pk]),
+                current_url,
+            )
+        context.update(
+            {
+                "archived_clients": archived_clients,
+                "client_breadcrumbs": _client_breadcrumbs(
+                    {"label": "Clientes archivados", "url": ""},
+                ),
+                "back_url": reverse("core:client_list"),
+                "page_title": "Clientes archivados",
+                "page_description": (
+                    "Consulta clientes archivados y gestiona su reactivacion o eliminacion definitiva."
+                ),
+            }
+        )
+        return context
+
+
+class ClientArchiveView(AppLoginRequiredMixin, TemplateView):
+    template_name = "core/client_archive_confirm.html"
+
+    def get_client(self):
+        if not hasattr(self, "_client"):
+            self._client = get_object_or_404(Client.objects.active(), pk=self.kwargs["pk"])
+        return self._client
+
+    def get_back_url(self):
+        return _safe_next_url(self.request) or reverse("core:client_detail", args=[self.get_client().pk])
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        client = self.get_client()
+        detail_url = _client_detail_navigation_url(client, self.get_back_url())
+        future_active_appointments_count = client.appointments.filter(
+            start_at__gte=timezone.now(),
+            status__in=Appointment.active_statuses(),
+        ).count()
+        context.update(
+            {
+                "page_title": "Archivar cliente",
+                "page_description": "Confirma si quieres sacar a este cliente de la operativa activa.",
+                "client_obj": client,
+                "client_breadcrumbs": _client_breadcrumbs(
+                    {"label": client.name, "url": detail_url},
+                    {"label": "Archivar", "url": ""},
+                ),
+                "back_url": self.get_back_url(),
+                "future_active_appointments_count": future_active_appointments_count,
+                "archived_client_list_url": _archived_client_list_url(),
+            }
+        )
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.get_client().archive()
+        return HttpResponseRedirect(_archived_client_list_url())
+
+
+class ClientReactivateView(AppLoginRequiredMixin, TemplateView):
+    template_name = "core/client_reactivate_confirm.html"
+
+    def get_client(self):
+        if not hasattr(self, "_client"):
+            self._client = get_object_or_404(Client.objects.archived(), pk=self.kwargs["pk"])
+        return self._client
+
+    def get_back_url(self):
+        return _safe_next_url(self.request) or _archived_client_list_url()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        client = self.get_client()
+        back_url = self.get_back_url()
+        detail_url = _client_detail_navigation_url(client, back_url)
+        context.update(
+            {
+                "page_title": "Reactivar cliente",
+                "page_description": "Confirma si quieres devolver este cliente a la operativa activa.",
+                "client_obj": client,
+                "client_breadcrumbs": _client_breadcrumbs(
+                    {"label": "Clientes archivados", "url": _archived_client_list_url()},
+                    {"label": client.name, "url": detail_url},
+                    {"label": "Reactivar", "url": ""},
+                ),
+                "back_url": back_url,
+            }
+        )
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.get_client().reactivate()
+        return HttpResponseRedirect(reverse("core:client_list"))
+
+
+class ClientDeleteView(AppLoginRequiredMixin, TemplateView):
+    template_name = "core/client_delete_confirm.html"
+
+    def get_client(self):
+        if not hasattr(self, "_client"):
+            self._client = get_object_or_404(Client.objects.archived(), pk=self.kwargs["pk"])
+        return self._client
+
+    def get_back_url(self):
+        return _safe_next_url(self.request) or _archived_client_list_url()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        client = self.get_client()
+        back_url = self.get_back_url()
+        detail_url = _client_detail_navigation_url(client, back_url)
+        context.update(
+            {
+                "page_title": "Eliminar definitivamente",
+                "page_description": "Confirma la eliminacion total de este cliente archivado.",
+                "client_obj": client,
+                "client_breadcrumbs": _client_breadcrumbs(
+                    {"label": "Clientes archivados", "url": _archived_client_list_url()},
+                    {"label": client.name, "url": detail_url},
+                    {"label": "Eliminar definitivamente", "url": ""},
+                ),
+                "back_url": back_url,
+                "appointment_count": client.appointments.count(),
+            }
+        )
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.get_client().delete()
+        return HttpResponseRedirect(_archived_client_list_url())
 
 
 class ServiceSettingsView(AppLoginRequiredMixin, TemplateView):

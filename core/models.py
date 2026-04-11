@@ -2,7 +2,7 @@ from datetime import datetime, time, timedelta
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, RegexValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
@@ -221,17 +221,50 @@ def agenda_slot_day(target_datetime):
     return timezone.localtime(target_datetime).date()
 
 
+class ClientQuerySet(models.QuerySet):
+    def active(self):
+        return self.filter(is_archived=False)
+
+    def archived(self):
+        return self.filter(is_archived=True)
+
+
 class Client(models.Model):
     name = models.CharField(max_length=160)
     phone = models.CharField(max_length=32, blank=True)
     email = models.EmailField(blank=True)
     notes = models.CharField(max_length=255, blank=True)
+    is_archived = models.BooleanField(default=False, db_index=True)
+
+    objects = ClientQuerySet.as_manager()
 
     class Meta:
         ordering = ("name", "id")
 
     def __str__(self):
         return self.name
+
+    @transaction.atomic
+    def archive(self):
+        if self.is_archived:
+            return 0
+
+        archive_cutoff = timezone.now()
+        cancelled_appointments = self.appointments.filter(
+            start_at__gte=archive_cutoff,
+            status__in=Appointment.active_statuses(),
+        ).update(status=Appointment.Status.CANCELLED)
+
+        self.is_archived = True
+        self.save(update_fields=["is_archived"])
+        return cancelled_appointments
+
+    def reactivate(self):
+        if not self.is_archived:
+            return False
+        self.is_archived = False
+        self.save(update_fields=["is_archived"])
+        return True
 
 
 class ServiceQuerySet(models.QuerySet):

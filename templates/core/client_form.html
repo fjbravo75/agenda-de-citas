@@ -8,11 +8,25 @@
 <section class="section-stack">
     <header class="page-header">
         <div class="page-header__copy">
+            {% if client_breadcrumbs %}
+            <nav class="settings-breadcrumbs" aria-label="Ruta de clientes">
+                {% for crumb in client_breadcrumbs %}
+                {% if not forloop.first %}
+                <span class="settings-breadcrumbs__separator" aria-hidden="true">/</span>
+                {% endif %}
+                {% if crumb.url and not forloop.last %}
+                <a class="settings-breadcrumbs__item" href="{{ crumb.url }}">{{ crumb.label }}</a>
+                {% else %}
+                <span class="settings-breadcrumbs__item settings-breadcrumbs__item--current"{% if forloop.last %} aria-current="page"{% endif %}>{{ crumb.label }}</span>
+                {% endif %}
+                {% endfor %}
+            </nav>
+            {% endif %}
             <h1>{{ page_title }}</h1>
             <p class="text-secondary">{{ page_description }}</p>
         </div>
         <div class="page-actions">
-            <a class="button button--secondary" href="{{ back_url }}">Volver a Nueva cita</a>
+            <a class="button button--secondary" href="{{ back_url }}">{{ back_label }}</a>
         </div>
     </header>
 </section>
@@ -26,6 +40,7 @@
             <input type="hidden" name="day" value="{{ return_day }}">
             <input type="hidden" name="slot_time" value="{{ return_slot_time }}">
             <input type="hidden" name="appointment_next" value="{{ appointment_next_url }}">
+            <input type="hidden" name="next" value="{{ next_url }}">
 
             {% if appointment_context_label %}
             <div class="stack-sm">
@@ -59,8 +74,8 @@
             </div>
 
             <div class="page-actions">
-                <button class="button button--primary" type="submit">Guardar cliente</button>
-                <a class="button button--secondary" href="{{ back_url }}">Cancelar</a>
+                <button class="button button--primary" type="submit">{{ submit_label }}</button>
+                <a class="button button--secondary" href="{{ back_url }}">{{ back_label }}</a>
             </div>
         </form>
     </article>

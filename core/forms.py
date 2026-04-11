@@ -143,7 +143,7 @@ class AppointmentForm(forms.Form):
         self.instance = instance or Appointment()
         self._selected_services = []
         super().__init__(*args, **kwargs)
-        self.fields["client"].queryset = Client.objects.order_by("name", "id")
+        self.fields["client"].queryset = self._clients_queryset()
         self.fields["services"].queryset = self._services_queryset()
         self._configure_status_field()
         target_day = self._resolve_target_day(initial_day)
@@ -266,6 +266,13 @@ class AppointmentForm(forms.Form):
                 Q(is_active=True) | Q(pk__in=current_service_ids)
             ).distinct().order_by("name", "id")
         return Service.objects.active().order_by("name", "id")
+
+    def _clients_queryset(self):
+        if self.instance.pk and self.instance.client_id:
+            return Client.objects.filter(
+                Q(is_archived=False) | Q(pk=self.instance.client_id)
+            ).distinct().order_by("name", "id")
+        return Client.objects.active().order_by("name", "id")
 
     def _first_bookable_slot(self, target_day):
         day_availability = DayAvailabilityResolver.resolve_for_global_agenda(target_day)

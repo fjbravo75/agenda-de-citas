@@ -96,10 +96,11 @@
                             <td><span class="badge badge--{{ item.status_key }}">{{ item.status_label }}</span></td>
                             {% if not client_obj.is_archived %}
                             <td>
+                                <a href="{{ item.repeat_url }}">Repetir cita</a>
                                 {% if item.can_edit %}
-                                <a href="{{ item.edit_url }}">Editar cita</a>
+                                · <a href="{{ item.edit_url }}">Editar cita</a>
                                 {% else %}
-                                <span class="text-secondary">Sin accion operativa</span>
+                                · <span class="text-secondary">Sin accion operativa</span>
                                 {% endif %}
                             </td>
                             {% endif %}

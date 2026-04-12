@@ -1526,6 +1526,118 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertContains(response, "Volver a clientes")
         self.assertContains(response, 'name="next"')
 
+    def test_create_view_prefills_client_and_active_services_from_source_appointment(self):
+        source_appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            self.operational_day,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        source_appointment.services.set([self.review_service, self.control_service])
+        source_appointment.internal_notes = "Nota de origen"
+        source_appointment.save(update_fields=["internal_notes"])
+        next_url = reverse("core:client_detail", args=[self.primary_client.pk])
+
+        response = self.client.get(
+            reverse("core:appointment_create"),
+            {
+                "source_appointment": source_appointment.pk,
+                "next": next_url,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(str(response.context["form"]["client"].value()), str(self.primary_client.pk))
+        self.assertCountEqual(
+            response.context["form"]["services"].value(),
+            [self.review_service.pk, self.control_service.pk],
+        )
+        self.assertEqual(response.context["form"]["status"].value(), Appointment.Status.PENDING)
+        self.assertEqual(response.context["back_url"], next_url)
+        self.assertNotContains(response, "Nota de origen")
+
+    def test_create_view_reuses_source_appointment_services_only_when_still_selectable(self):
+        source_appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            self.operational_day,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        source_appointment.services.set([self.review_service, self.control_service])
+        self.control_service.is_active = False
+        self.control_service.save(update_fields=["is_active"])
+
+        response = self.client.get(
+            reverse("core:appointment_create"),
+            {
+                "source_appointment": source_appointment.pk,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["form"]["services"].value(), [self.review_service.pk])
+        self.assertContains(response, self.review_service.name)
+        self.assertNotContains(response, self.control_service.name)
+
+    def test_create_view_does_not_prefill_archived_client_even_if_source_appointment_is_provided(self):
+        source_appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            self.operational_day,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        self.primary_client.is_archived = True
+        self.primary_client.save(update_fields=["is_archived"])
+
+        response = self.client.get(
+            reverse("core:appointment_create"),
+            {
+                "source_appointment": source_appointment.pk,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context["form"]["client"].value())
+        self.assertEqual(response.context["form"]["services"].value(), [self.review_service.pk])
+        self.assertNotContains(response, self.primary_client.name)
+
+    def test_create_view_can_create_new_appointment_from_source_appointment_prefill(self):
+        source_appointment = self._create_appointment(
+            self.primary_client,
+            self.review_service,
+            self.operational_day,
+            time(9, 0),
+            Appointment.Status.CONFIRMED,
+        )
+        source_appointment.services.set([self.review_service, self.control_service])
+        target_day = self._next_working_day(start_day=self.operational_day)
+
+        response = self.client.post(
+            reverse("core:appointment_create"),
+            self._appointment_form_data(
+                day=target_day.isoformat(),
+                slot_time="11:00",
+                services=[self.review_service.pk, self.control_service.pk],
+                status=Appointment.Status.CONFIRMED,
+                internal_notes="Nueva nota",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        created_appointment = Appointment.objects.exclude(pk=source_appointment.pk).get()
+        self.assertEqual(created_appointment.client_id, self.primary_client.pk)
+        self.assertEqual(
+            self._appointment_service_ids(created_appointment),
+            [self.review_service.pk, self.control_service.pk],
+        )
+        self.assertEqual(created_appointment.slot_day, target_day)
+        self.assertEqual(created_appointment.slot_time, "11:00")
+        self.assertEqual(created_appointment.status, Appointment.Status.CONFIRMED)
+        self.assertEqual(created_appointment.internal_notes, "Nueva nota")
+
     def test_archived_client_is_hidden_for_new_appointments_but_kept_for_existing_edits(self):
         appointment = self._create_appointment(
             self.primary_client,
@@ -2773,6 +2885,7 @@ class ClientDetailViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertContains(response, "Pendiente")
         self.assertContains(response, "Cancelada")
         history_urls = [item["edit_url"] for item in response.context["client_history"]]
+        repeat_urls = [item["repeat_url"] for item in response.context["client_history"]]
         self.assertEqual(
             history_urls,
             [
@@ -2783,9 +2896,43 @@ class ClientDetailViewTests(AuthenticatedAgendaBaseTestCase):
                 "",
             ],
         )
+        self.assertEqual(
+            repeat_urls,
+            [
+                (
+                    f"{reverse('core:appointment_create')}?"
+                    f"{urlencode({'next': reverse('core:client_detail', args=[self.primary_client.pk]), 'source_appointment': newest_appointment.pk})}"
+                ),
+                (
+                    f"{reverse('core:appointment_create')}?"
+                    f"{urlencode({'next': reverse('core:client_detail', args=[self.primary_client.pk]), 'source_appointment': middle_appointment.pk})}"
+                ),
+                (
+                    f"{reverse('core:appointment_create')}?"
+                    f"{urlencode({'next': reverse('core:client_detail', args=[self.primary_client.pk]), 'source_appointment': oldest_appointment.pk})}"
+                ),
+            ],
+        )
+        self.assertContains(response, "Repetir cita", count=3)
         self.assertContains(response, "Sin accion operativa")
         self.assertLess(content.index("Evaluacion"), content.index("Control"))
         self.assertLess(content.index("Control"), content.index("Revision"))
+
+    def test_archived_client_detail_does_not_expose_repeat_action(self):
+        self.primary_client.is_archived = True
+        self.primary_client.save(update_fields=["is_archived"])
+        self._create_existing_cancelled_appointment(
+            self.primary_client,
+            self.review_service,
+            self.operational_day,
+            time(10, 0),
+        )
+
+        response = self.client.get(self._client_detail_url(self.primary_client))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Repetir cita")
+        self.assertTrue(all(item["repeat_url"] == "" for item in response.context["client_history"]))
 
     def test_client_detail_view_uses_next_for_back_link(self):
         today = self.operational_day

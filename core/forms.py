@@ -139,6 +139,7 @@ class AppointmentForm(forms.Form):
         initial_day=None,
         initial_slot_time=None,
         initial_client_id=None,
+        initial_service_ids=None,
         **kwargs,
     ):
         self.instance = instance or Appointment()
@@ -171,6 +172,10 @@ class AppointmentForm(forms.Form):
         initial_client = self._resolve_initial_client(initial_client_id)
         if initial_client is not None:
             self.initial.setdefault("client", initial_client.pk)
+
+        initial_services = self._resolve_initial_services(initial_service_ids)
+        if initial_services:
+            self.initial.setdefault("services", [service.pk for service in initial_services])
 
         if self._slot_is_bookable(initial_slot_time):
             self.initial.setdefault("slot_time", initial_slot_time)
@@ -337,6 +342,26 @@ class AppointmentForm(forms.Form):
             return self.fields["client"].queryset.get(pk=normalized_client_id)
         except Client.DoesNotExist:
             return None
+
+    def _resolve_initial_services(self, initial_service_ids):
+        if self.instance.pk or not initial_service_ids:
+            return []
+
+        normalized_service_ids = []
+        for service_id in initial_service_ids:
+            try:
+                normalized_service_ids.append(int(service_id))
+            except (TypeError, ValueError):
+                continue
+
+        if not normalized_service_ids:
+            return []
+
+        services_by_id = {
+            service.pk: service
+            for service in self.fields["services"].queryset.filter(pk__in=normalized_service_ids)
+        }
+        return [services_by_id[service_id] for service_id in normalized_service_ids if service_id in services_by_id]
 
     def _assign_instance_values(self, cleaned_data):
         client = cleaned_data.get("client")

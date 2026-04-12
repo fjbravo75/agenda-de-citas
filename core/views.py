@@ -259,6 +259,12 @@ def _appointment_create_url(target_day=None, slot_time="", next_url="", client_i
     return f"{base_url}?{urlencode(query_params)}"
 
 
+def _appointment_repeat_url(source_appointment, *, next_url=""):
+    base_url = _appointment_create_url(next_url=next_url)
+    separator = "&" if "?" in base_url else "?"
+    return f"{base_url}{separator}{urlencode({'source_appointment': source_appointment.pk})}"
+
+
 def _client_create_url(target_day=None, slot_time="", appointment_next_url=""):
     query_params = {}
 
@@ -1177,6 +1183,7 @@ class AppointmentFormViewBase(AppLoginRequiredMixin, FormView):
         kwargs["initial_day"] = self.get_selected_day()
         kwargs["initial_slot_time"] = self.get_initial_slot_time()
         kwargs["initial_client_id"] = self.get_initial_client_id()
+        kwargs["initial_service_ids"] = self.get_initial_service_ids()
         return kwargs
 
     def get_initial_slot_time(self):
@@ -1187,7 +1194,42 @@ class AppointmentFormViewBase(AppLoginRequiredMixin, FormView):
 
     def get_initial_client_id(self):
         raw_client_id = self.request.GET.get("client", "").strip()
-        return raw_client_id or None
+        if raw_client_id:
+            return raw_client_id
+
+        source_appointment = self.get_source_appointment()
+        if source_appointment is None:
+            return None
+        return source_appointment.client_id
+
+    def get_source_appointment(self):
+        if hasattr(self, "_source_appointment"):
+            return self._source_appointment
+
+        raw_source_appointment_id = self.request.GET.get("source_appointment", "").strip()
+        if not raw_source_appointment_id:
+            self._source_appointment = None
+            return self._source_appointment
+
+        try:
+            normalized_source_appointment_id = int(raw_source_appointment_id)
+        except (TypeError, ValueError):
+            self._source_appointment = None
+            return self._source_appointment
+
+        self._source_appointment = (
+            Appointment.objects.select_related("client")
+            .prefetch_related("services")
+            .filter(pk=normalized_source_appointment_id)
+            .first()
+        )
+        return self._source_appointment
+
+    def get_initial_service_ids(self):
+        source_appointment = self.get_source_appointment()
+        if source_appointment is None:
+            return []
+        return list(source_appointment.services.values_list("pk", flat=True))
 
     def get_back_label(self, back_url):
         if _url_path(back_url) == reverse("core:client_list"):
@@ -1443,6 +1485,12 @@ class ClientDetailView(AppLoginRequiredMixin, TemplateView):
                 edit_url = reverse("core:appointment_update", args=[appointment.pk])
                 if slot_day is not None:
                     edit_url = f"{edit_url}?{_query_string(slot_day.year, slot_day.month, slot_day.day)}"
+            repeat_url = ""
+            if not client.is_archived:
+                repeat_url = _appointment_repeat_url(
+                    appointment,
+                    next_url=current_url,
+                )
             history_items.append(
                 {
                     "date_label": _format_compact_day(slot_day) if slot_day is not None else "",
@@ -1452,6 +1500,7 @@ class ClientDetailView(AppLoginRequiredMixin, TemplateView):
                     "status_key": appointment.status,
                     "can_edit": can_edit,
                     "edit_url": edit_url,
+                    "repeat_url": repeat_url,
                 }
             )
 

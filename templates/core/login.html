@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Acceso - Agenda de Citas{% endblock %}
+{% block body_class %}theme-root access-screen{% endblock %}
+
+{% block extra_head %}
+    <link rel="stylesheet" href="{% static 'css/login.css' %}?v=20260412-app-login">
+{% endblock %}
+
+{% block site %}
+<div class="access-page">
+    <header class="access-page__header">
+        <div class="shell shell--app header-row">
+            <span class="brand" aria-label="Agenda de Citas">
+                <span class="brand__mark brand__mark--accent">AC</span>
+                <span class="brand__meta">
+                    <span class="brand__name">Agenda de Citas</span>
+                    <span class="brand__subtle">Agenda operativa interna</span>
+                </span>
+            </span>
+        </div>
+    </header>
+
+    <main class="access-page__main">
+        <div class="shell shell--app">
+            <div class="access-stage">
+                <div class="access-grid">
+                    <section class="access-copy" aria-label="Presentacion">
+                        <p class="eyebrow">ACCESO PROFESIONAL</p>
+                        <h1>Organiza tu agenda con más claridad</h1>
+                        <p class="text-secondary">
+                            Consulta tu mes, revisa el día y gestiona citas, clientes y bloqueos desde una sola app,
+                            con una operativa simple y visual.
+                        </p>
+                        <ul class="simple-list" aria-label="Ventajas principales">
+                            <li>Visualiza tu agenda mensual y el detalle diario de un vistazo</li>
+                            <li>Gestiona citas, clientes y bloqueos con una operativa clara</li>
+                            <li>Mantén el control del tiempo sin complicarte más de la cuenta</li>
+                        </ul>
+                        <p class="text-secondary">Entra y retoma tu trabajo en unos segundos.</p>
+                    </section>
+
+                    <section class="section-surface access-login-panel" aria-label="Acceso">
+                        <form class="access-login-form" action="{% url 'core:login' %}" method="post" novalidate>
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ next_url }}">
+
+                            <header class="access-login-form__header">
+                                <p class="eyebrow">INICIO DE SESIÓN</p>
+                                <h2>Iniciar sesión</h2>
+                                <p class="text-secondary">Accede con tu usuario y contraseña para continuar.</p>
+                            </header>
+
+                            <div class="access-login-fields">
+                                <div class="field">
+                                    <label for="{{ form.username.id_for_label }}">Usuario</label>
+                                    <input
+                                        type="text"
+                                        name="{{ form.username.html_name }}"
+                                        id="{{ form.username.id_for_label }}"
+                                        value="{{ form.username.value|default:'' }}"
+                                        autocomplete="username"
+                                        autocapitalize="none"
+                                        spellcheck="false"
+                                        required
+                                    >
+                                    {% if form.username.errors %}
+                                        <div class="field__feedback">
+                                            {% for error in form.username.errors %}
+                                                <span>{{ error }}</span>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+
+                                <div class="field">
+                                    <label for="{{ form.password.id_for_label }}">Contraseña</label>
+                                    <input
+                                        type="password"
+                                        name="{{ form.password.html_name }}"
+                                        id="{{ form.password.id_for_label }}"
+                                        autocomplete="current-password"
+                                        required
+                                    >
+                                    {% if form.password.errors %}
+                                        <div class="field__feedback">
+                                            {% for error in form.password.errors %}
+                                                <span>{{ error }}</span>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+
+                            {% if form.non_field_errors %}
+                                <div class="access-login-messages" role="status">
+                                    <ul>
+                                        {% for error in form.non_field_errors %}
+                                            <li>{{ error }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            {% endif %}
+
+                            <footer class="access-login-actions">
+                                <button type="submit" class="button button--primary access-login-submit">Entrar</button>
+                            </footer>
+                        </form>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="access-page__footer">
+        <div class="shell shell--app footer-row">
+            <div class="footer-row__meta">
+                <p class="footer-title">AGENDA OPERATIVA</p>
+                <p class="footer-copy">Calendario, clientes y ajustes internos del negocio.</p>
+            </div>
+            <div class="access-footer__aside">
+                <div class="access-footer__links" aria-label="Secciones internas">
+                    <span>Agenda</span>
+                    <span>Clientes</span>
+                    <span>Ajustes</span>
+                </div>
+                <p class="footer-copy">Agenda de Citas</p>
+            </div>
+        </div>
+    </footer>
+</div>
+{% endblock %}

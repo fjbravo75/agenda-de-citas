@@ -781,10 +781,10 @@ class OfficialHolidaySyncFormTests(TestCase):
 
 class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
     def _assert_redirects_to_login(self, response, next_url):
-        expected_url = f"{reverse('wagtailadmin_login')}?{urlencode({'next': next_url})}"
+        expected_url = f"{reverse('core:login')}?{urlencode({'next': next_url})}"
         self.assertRedirects(response, expected_url, fetch_redirect_response=False)
 
-    def test_app_entrypoint_redirects_anonymous_user_to_wagtail_login(self):
+    def test_app_entrypoint_redirects_anonymous_user_to_app_login(self):
         today = self.operational_day
         query = urlencode({"year": today.year, "month": today.month, "day": today.day})
         requested_url = f"{reverse('core:app_entrypoint')}?{query}"
@@ -796,7 +796,7 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_appointment_create_redirects_anonymous_user_to_wagtail_login(self):
+    def test_appointment_create_redirects_anonymous_user_to_app_login(self):
         today = self.operational_day
         query = urlencode({"year": today.year, "month": today.month, "day": today.day})
         requested_url = f"{reverse('core:appointment_create')}?{query}"
@@ -808,7 +808,7 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_client_create_redirects_anonymous_user_to_wagtail_login(self):
+    def test_client_create_redirects_anonymous_user_to_app_login(self):
         today = self.operational_day
         agenda_query = urlencode({"year": today.year, "month": today.month, "day": today.day})
         appointment_next = f"{reverse('core:app_entrypoint')}?{agenda_query}"
@@ -836,7 +836,7 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_client_create_from_list_redirects_anonymous_user_to_wagtail_login(self):
+    def test_client_create_from_list_redirects_anonymous_user_to_app_login(self):
         requested_url = f"{reverse('core:client_create')}?{urlencode({'next': reverse('core:client_list')})}"
 
         response = self.client.get(
@@ -846,21 +846,21 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_client_update_redirects_anonymous_user_to_wagtail_login(self):
+    def test_client_update_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:client_update", args=[self.primary_client.pk])
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_client_archive_redirects_anonymous_user_to_wagtail_login(self):
+    def test_client_archive_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:client_archive", args=[self.primary_client.pk])
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_appointment_update_redirects_anonymous_user_to_wagtail_login(self):
+    def test_appointment_update_redirects_anonymous_user_to_app_login(self):
         today = self.operational_day
         appointment = self._create_appointment(
             self.primary_client,
@@ -879,105 +879,105 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_client_detail_redirects_anonymous_user_to_wagtail_login(self):
+    def test_client_detail_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:client_detail", args=[self.primary_client.pk])
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_client_list_redirects_anonymous_user_to_wagtail_login(self):
+    def test_client_list_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:client_list")
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_archived_client_list_redirects_anonymous_user_to_wagtail_login(self):
+    def test_archived_client_list_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:archived_client_list")
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_client_reactivate_redirects_anonymous_user_to_wagtail_login(self):
+    def test_client_reactivate_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:client_reactivate", args=[self.primary_client.pk])
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_client_delete_redirects_anonymous_user_to_wagtail_login(self):
+    def test_client_delete_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:client_delete", args=[self.primary_client.pk])
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_ui_preview_redirects_anonymous_user_to_wagtail_login(self):
+    def test_ui_preview_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:ui_preview")
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_calendar_ui_preview_redirects_anonymous_user_to_wagtail_login(self):
+    def test_calendar_ui_preview_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:calendar_ui_preview")
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_agenda_settings_redirects_anonymous_user_to_wagtail_login(self):
+    def test_agenda_settings_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:agenda_settings")
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_settings_index_redirects_anonymous_user_to_wagtail_login(self):
+    def test_settings_index_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:settings_index")
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_service_settings_redirects_anonymous_user_to_wagtail_login(self):
+    def test_service_settings_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:service_settings")
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_service_create_redirects_anonymous_user_to_wagtail_login(self):
+    def test_service_create_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:service_create")
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_service_update_redirects_anonymous_user_to_wagtail_login(self):
+    def test_service_update_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:service_update", args=[self.review_service.pk])
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_service_delete_redirects_anonymous_user_to_wagtail_login(self):
+    def test_service_delete_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:service_delete", args=[self.review_service.pk])
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_manual_closure_create_redirects_anonymous_user_to_wagtail_login(self):
+    def test_manual_closure_create_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:manual_closure_create")
 
         response = self.client.get(requested_url)
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_manual_closure_update_redirects_anonymous_user_to_wagtail_login(self):
+    def test_manual_closure_update_redirects_anonymous_user_to_app_login(self):
         manual_closure = ManualClosure.objects.create(
             start_date=timezone.localdate(),
             end_date=timezone.localdate(),
@@ -989,7 +989,7 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
 
         self._assert_redirects_to_login(response, requested_url)
 
-    def test_manual_closure_delete_redirects_anonymous_user_to_wagtail_login(self):
+    def test_manual_closure_delete_redirects_anonymous_user_to_app_login(self):
         manual_closure = ManualClosure.objects.create(
             start_date=timezone.localdate(),
             end_date=timezone.localdate(),
@@ -1017,26 +1017,81 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
 
 
 class SessionAccessAndLoginBrandingTests(AgendaBaseTestCase):
+    def test_login_route_is_exposed_at_acceso(self):
+        self.assertEqual(reverse("core:login"), "/acceso/")
+
+    def test_logout_route_is_exposed_at_salir(self):
+        self.assertEqual(reverse("core:logout"), "/salir/")
+
     def test_login_page_uses_custom_branding_and_preserves_next(self):
         app_url = reverse("core:app_entrypoint")
 
-        response = self.client.get(reverse("wagtailadmin_login"), {"next": app_url})
+        response = self.client.get(reverse("core:login"), {"next": app_url})
 
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "wagtailadmin/login.html")
+        self.assertTemplateUsed(response, "core/login.html")
+        self.assertTemplateNotUsed(response, "wagtailadmin/login.html")
         self.assertContains(response, "Agenda de Citas")
-        self.assertContains(response, "Accede a la agenda")
+        self.assertContains(response, "ACCESO PROFESIONAL")
+        self.assertContains(response, "Organiza tu agenda con más claridad")
+        self.assertContains(response, "INICIO DE SESIÓN")
+        self.assertContains(response, "Iniciar sesi")
+        self.assertContains(response, "Agenda operativa interna")
+        self.assertContains(response, "Agenda operativa")
+        self.assertContains(response, "Calendario, clientes y ajustes internos del negocio.")
         self.assertContains(response, "Acceso - Agenda de Citas")
         self.assertContains(response, 'value="/app/"')
         self.assertContains(response, "Entrar")
+        self.assertContains(response, "Usuario")
+        self.assertContains(response, "Contrase")
+        self.assertNotContains(response, "wagtail-login.css")
+        self.assertNotContains(response, "Forgotten password")
+        self.assertNotContains(response, "Remember me")
+        self.assertNotContains(response, "Crear cuenta")
+        self.assertNotContains(response, "Registrarse")
+
+    def test_authenticated_user_visiting_login_redirects_to_app_entrypoint(self):
+        self.login_app_user()
+
+        response = self.client.get(reverse("core:login"))
+
+        self.assertRedirects(response, reverse("core:app_entrypoint"))
+
+    def test_authenticated_user_visiting_login_redirects_to_safe_next(self):
+        self.login_app_user()
+        next_url = reverse("core:client_list")
+
+        response = self.client.get(reverse("core:login"), {"next": next_url})
+
+        self.assertRedirects(response, next_url)
+
+    def test_authenticated_user_visiting_login_ignores_unsafe_next(self):
+        self.login_app_user()
+
+        response = self.client.get(reverse("core:login"), {"next": "https://example.com/"})
+
+        self.assertRedirects(response, reverse("core:app_entrypoint"))
 
     def test_login_page_post_redirects_to_app_when_next_is_provided(self):
         response = self.client.post(
-            reverse("wagtailadmin_login"),
+            reverse("core:login"),
             {
                 "username": self.app_user.username,
                 "password": "agenda-pass-123",
                 "next": reverse("core:app_entrypoint"),
+            },
+        )
+
+        self.assertRedirects(response, reverse("core:app_entrypoint"))
+        self.assertIn("_auth_user_id", self.client.session)
+
+    def test_login_page_post_redirects_to_app_when_next_is_not_safe(self):
+        response = self.client.post(
+            reverse("core:login"),
+            {
+                "username": self.app_user.username,
+                "password": "agenda-pass-123",
+                "next": "https://example.com/",
             },
         )
 
@@ -1050,7 +1105,7 @@ class SessionAccessAndLoginBrandingTests(AgendaBaseTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.app_user.username)
-        self.assertContains(response, reverse("core:app_logout"))
+        self.assertContains(response, reverse("core:logout"))
         self.assertContains(response, "Cerrar sesion")
         self.assertContains(response, f'href="{reverse("core:app_entrypoint")}"')
         self.assertContains(response, f'href="{reverse("core:client_list")}"')
@@ -1062,32 +1117,32 @@ class SessionAccessAndLoginBrandingTests(AgendaBaseTestCase):
         self.assertNotContains(response, "/app/calendar-ui/")
         self.assertNotContains(response, ">CMS<")
 
-    def test_app_logout_redirects_to_app_oriented_login_and_closes_session(self):
+    def test_app_logout_redirects_to_login_and_closes_session(self):
         self.login_app_user()
 
-        response = self.client.post(reverse("core:app_logout"))
+        response = self.client.post(reverse("core:logout"))
 
-        expected_login_url = f"{reverse('wagtailadmin_login')}?{urlencode({'next': reverse('core:app_entrypoint')})}"
-        self.assertRedirects(response, expected_login_url, fetch_redirect_response=False)
+        self.assertRedirects(response, reverse("core:login"), fetch_redirect_response=False)
         self.assertNotIn("_auth_user_id", self.client.session)
 
         app_response = self.client.get(reverse("core:app_entrypoint"))
+        expected_login_url = f"{reverse('core:login')}?{urlencode({'next': reverse('core:app_entrypoint')})}"
         self.assertRedirects(app_response, expected_login_url, fetch_redirect_response=False)
 
     def test_login_after_app_logout_returns_user_to_app_instead_of_admin(self):
         self.login_app_user()
 
-        logout_response = self.client.post(reverse("core:app_logout"))
-        expected_login_url = f"{reverse('wagtailadmin_login')}?{urlencode({'next': reverse('core:app_entrypoint')})}"
+        logout_response = self.client.post(reverse("core:logout"))
+        expected_login_url = reverse("core:login")
 
         self.assertRedirects(logout_response, expected_login_url, fetch_redirect_response=False)
 
         login_page = self.client.get(logout_response.headers["Location"])
         self.assertEqual(login_page.status_code, 200)
-        self.assertContains(login_page, 'value="/app/"')
+        self.assertContains(login_page, 'value=""')
 
         login_response = self.client.post(
-            reverse("wagtailadmin_login"),
+            reverse("core:login"),
             {
                 "username": self.app_user.username,
                 "password": "agenda-pass-123",

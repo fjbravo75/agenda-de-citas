@@ -12,7 +12,7 @@ urlpatterns = [
     path("django-admin/", admin.site.urls),
     path("admin/", include(wagtailadmin_urls)),
     path("documents/", include(wagtaildocs_urls)),
-    path("app/", include("core.urls")),
+    path("", include("core.urls")),
     path("", RedirectView.as_view(url="/app/", permanent=False)),
     path("", include(wagtail_urls)),
 ]

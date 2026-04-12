@@ -4,17 +4,19 @@ from urllib.parse import urlencode, urlsplit
 
 import requests
 from django.contrib import messages
+from django.contrib.auth import login as auth_login, logout as auth_logout
+from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Count, Prefetch, Q
 from django.db.models.functions import TruncDate
 from django.http import HttpResponseRedirect
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
-from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views import View
+from django.views.decorators.http import require_POST
 from django.views.generic import FormView, TemplateView
-from wagtail.admin.views.account import LogoutView as WagtailLogoutView
 
 from .day_availability import DayAvailabilityResolver
 from .forms import (
@@ -136,10 +138,6 @@ def _build_calendar_context(
 
 def _agenda_url_for_day(target_day):
     return f"{reverse('core:app_entrypoint')}?{_query_string(target_day.year, target_day.month, target_day.day)}"
-
-
-def _app_oriented_login_url():
-    return f"{reverse('wagtailadmin_login')}?{urlencode({'next': reverse('core:app_entrypoint')})}"
 
 
 def _format_count_label(count, singular, plural):
@@ -790,14 +788,39 @@ def _resolve_calendar_state(request):
     return year, month, selected_day, real_today
 
 
+def app_login_view(request):
+    next_url = _safe_next_url(request)
+    redirect_target = next_url or reverse("core:app_entrypoint")
+
+    if request.user.is_authenticated:
+        return redirect(redirect_target)
+
+    if request.method == "POST":
+        form = AuthenticationForm(request=request, data=request.POST)
+        if form.is_valid():
+            auth_login(request, form.get_user())
+            return redirect(redirect_target)
+    else:
+        form = AuthenticationForm(request=request)
+
+    return render(
+        request,
+        "core/login.html",
+        {
+            "form": form,
+            "next_url": next_url,
+        },
+    )
+
+
+@require_POST
+def app_logout_view(request):
+    auth_logout(request)
+    return redirect("core:login")
+
+
 class AppLoginRequiredMixin(LoginRequiredMixin):
-    login_url = reverse_lazy("wagtailadmin_login")
-
-
-class AppLogoutView(WagtailLogoutView):
-    @property
-    def next_page(self):
-        return _app_oriented_login_url()
+    login_url = reverse_lazy("core:login")
 
 
 class AppEntryPointView(AppLoginRequiredMixin, TemplateView):

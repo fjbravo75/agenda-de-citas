@@ -1,0 +1,327 @@
+.access-page {
+    min-height: 100dvh;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+}
+
+.access-page__header,
+.access-page__footer {
+    width: 100%;
+    margin: 0;
+    position: static;
+}
+
+.access-page__header {
+    background: #ffffff;
+    border-bottom: 1px solid var(--color-line);
+}
+
+.access-page__footer {
+    border-top: 1px solid var(--color-line);
+    background: transparent;
+    padding: 0;
+    margin-top: 32px;
+}
+
+.access-page__header .header-row,
+.access-page__footer .footer-row {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    border-radius: 0;
+}
+
+.access-page__header .header-row {
+    min-height: 56px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-block: 8px;
+}
+
+.access-page__footer .footer-row {
+    padding: 14px 0;
+    align-items: center;
+}
+
+/* igualar mejor el comportamiento tipográfico del footer interior */
+.access-page__footer .footer-title,
+.access-page__footer .footer-copy {
+    margin: 0;
+}
+
+.access-page__footer .footer-row__meta,
+.access-page__footer .footer-row__aside {
+    display: grid;
+    gap: 6px;
+}
+
+.access-page__footer .footer-row__aside {
+    justify-items: end;
+}
+
+.access-page__footer .footer-links,
+.access-page__footer .access-footer__links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 16px;
+    font-size: 14px;
+    line-height: 1.15;
+    color: var(--color-text);
+    margin: 0;
+}
+
+.access-page__main {
+    display: grid;
+    align-items: center;
+}
+
+.access-page__main > .shell.shell--app {
+    display: grid;
+    align-items: center;
+    min-height: 100%;
+    padding-top: 24px;
+    padding-bottom: 24px;
+}
+
+.access-stage {
+    width: 100%;
+}
+
+.access-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.02fr) minmax(380px, 0.98fr);
+    gap: 32px;
+    align-items: center;
+}
+
+.access-copy {
+    display: grid;
+    align-content: center;
+    justify-items: start;
+}
+
+.access-copy .eyebrow {
+    margin: 0 0 10px;
+}
+
+.access-copy h1 {
+    max-width: 9.5ch;
+    font-size: clamp(3rem, 4.2vw, 4.1rem);
+    line-height: 0.96;
+    letter-spacing: -0.045em;
+    font-weight: 700;
+    text-align: left;
+    margin: 0;
+}
+
+.access-copy .text-secondary {
+    max-width: 38rem;
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.58;
+}
+
+.access-copy h1 + .text-secondary {
+    margin-top: 18px;
+}
+
+.access-copy .simple-list {
+    gap: 10px;
+    margin: 20px 0 0;
+    font-size: 15px;
+    line-height: 1.52;
+}
+
+.access-copy .simple-list + .text-secondary {
+    margin-top: 18px;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.access-login-panel {
+    align-content: start;
+    padding: 28px;
+    border-radius: 12px;
+}
+
+.access-login-form {
+    display: grid;
+}
+
+.access-login-form__header {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 18px;
+}
+
+.access-login-form__header .eyebrow {
+    margin: 0;
+}
+
+.access-login-form__header h2 {
+    font-size: 32px;
+    line-height: 1.04;
+    letter-spacing: -0.04em;
+    font-weight: 700;
+    margin: 0;
+}
+
+.access-login-form__header .text-secondary {
+    margin: 0;
+}
+
+.access-login-fields {
+    display: grid;
+    gap: 14px;
+}
+
+.access-login-fields .field {
+    gap: 6px;
+}
+
+.access-login-fields .field label {
+    color: var(--color-text);
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.access-login-fields input[type="text"],
+.access-login-fields input[type="password"] {
+    min-height: 36px;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border-color: var(--color-field-border);
+    font-size: 14px;
+}
+
+.access-login-fields input[type="text"]:focus,
+.access-login-fields input[type="password"]:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px rgba(49, 88, 215, 0.08);
+}
+
+.field__feedback {
+    display: grid;
+    gap: 4px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--color-danger);
+}
+
+.access-login-messages {
+    margin-top: 18px;
+}
+
+.access-login-messages ul {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.access-login-messages li {
+    padding: 10px 12px;
+    border: 1px solid rgba(174, 76, 66, 0.22);
+    border-radius: 8px;
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.access-login-actions {
+    margin-top: 16px;
+}
+
+.access-login-submit {
+    width: 100%;
+    min-height: 36px;
+    height: 36px;
+    border-radius: 8px;
+}
+
+.access-footer__aside {
+    display: grid;
+    gap: 6px;
+    justify-items: end;
+    text-align: right;
+}
+
+.access-footer__links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 16px;
+    font-size: 14px;
+    line-height: 1.15;
+    color: var(--color-text);
+    margin: 0;
+}
+
+@media (max-width: 960px) {
+    .access-page__main > .shell.shell--app {
+        padding-top: 20px;
+        padding-bottom: 20px;
+    }
+
+    .access-grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+        align-items: start;
+    }
+
+    .access-copy {
+        align-content: start;
+    }
+
+    .access-page__footer .footer-row__aside,
+    .access-footer__aside {
+        justify-items: start;
+        text-align: left;
+    }
+
+    .access-page__footer .footer-links,
+    .access-page__footer .access-footer__links,
+    .access-footer__links {
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 640px) {
+    .access-page__main > .shell.shell--app,
+    .access-page__footer .footer-row {
+        width: min(calc(100% - 32px), var(--container-width));
+    }
+
+    .access-page__main > .shell.shell--app {
+        padding-top: 16px;
+        padding-bottom: 16px;
+    }
+
+    .access-login-panel {
+        padding: 20px;
+    }
+
+    .access-page__footer .footer-row {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .access-page__footer .footer-row__aside,
+    .access-footer__aside {
+        justify-items: start;
+        text-align: left;
+    }
+
+    .access-page__footer .footer-links,
+    .access-page__footer .access-footer__links,
+    .access-footer__links {
+        justify-content: flex-start;
+    }
+}

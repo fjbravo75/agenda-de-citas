@@ -23,7 +23,7 @@
             {% if request.user.is_authenticated %}
             <div class="session-chip" aria-label="Sesion actual">
                 <strong class="session-chip__user">{{ request.user.get_full_name|default:request.user.get_username }}</strong>
-                <form method="post" action="{% url 'core:app_logout' %}" class="session-chip__logout-form">
+                <form method="post" action="{% url 'core:logout' %}" class="session-chip__logout-form">
                     {% csrf_token %}
                     <button class="button button--ghost session-chip__logout" type="submit">Cerrar sesion</button>
                 </form>

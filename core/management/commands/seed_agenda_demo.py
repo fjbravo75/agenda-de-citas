@@ -5,7 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.day_availability import DayAvailabilityResolver
-from core.models import Appointment, AvailabilityBlock, Client, Service
+from core.models import Appointment, AvailabilityBlock, Client, Service, agenda_end_at_for_slot
 
 
 class Command(BaseCommand):
@@ -92,11 +92,11 @@ class Command(BaseCommand):
                 {"name": "Raul Soto", "phone": "+34 600 777 777", "email": "raul@example.com"},
             ],
             "services": [
-                {"name": "Fisio inicial", "duration_minutes": 60, "color": "#3158D7"},
-                {"name": "Revision", "duration_minutes": 45, "color": "#2E7A58"},
-                {"name": "Seguimiento", "duration_minutes": 30, "color": "#A06A11"},
-                {"name": "Evaluacion", "duration_minutes": 60, "color": "#AE4C42"},
-                {"name": "Control", "duration_minutes": 30, "color": "#6D7A8C"},
+                {"name": "Fisio inicial", "color": "#3158D7"},
+                {"name": "Revision", "color": "#2E7A58"},
+                {"name": "Seguimiento", "color": "#A06A11"},
+                {"name": "Evaluacion", "color": "#AE4C42"},
+                {"name": "Control", "color": "#6D7A8C"},
             ],
             "availability_blocks": [
                 {"day": demo_days["today"], "slot_time": "16:00", "label": "Bloqueo interno"},
@@ -196,7 +196,6 @@ class Command(BaseCommand):
         current_tz = timezone.get_current_timezone()
         created = 0
         for definition in appointment_definitions:
-            service = services[definition["service"]]
             start_at = timezone.make_aware(
                 datetime.combine(definition["day"], definition["start_time"]),
                 current_tz,
@@ -205,7 +204,7 @@ class Command(BaseCommand):
             appointment = Appointment.objects.create(
                 client=clients[definition["client"]],
                 start_at=start_at,
-                end_at=start_at + timedelta(minutes=service.duration_minutes),
+                end_at=agenda_end_at_for_slot(start_at),
                 status=(
                     Appointment.Status.CONFIRMED
                     if target_status == Appointment.Status.CANCELLED
@@ -213,6 +212,7 @@ class Command(BaseCommand):
                 ),
                 internal_notes=definition.get("internal_notes", ""),
             )
+            service = services[definition["service"]]
             appointment.services.set([service])
             if target_status == Appointment.Status.CANCELLED:
                 appointment.status = Appointment.Status.CANCELLED

@@ -11,7 +11,7 @@ class ClientAdmin(admin.ModelAdmin):
 
 @admin.register(Service)
 class ServiceAdmin(admin.ModelAdmin):
-    list_display = ("name", "duration_minutes", "color")
+    list_display = ("name", "color", "is_active")
     search_fields = ("name",)
 
 

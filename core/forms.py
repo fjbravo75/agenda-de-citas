@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
 
 from django import forms
 from django.core.exceptions import ValidationError
@@ -13,6 +13,7 @@ from .models import (
     Client,
     ManualClosure,
     Service,
+    agenda_end_at_for_slot,
     agenda_slot_operational_state_map,
 )
 
@@ -352,11 +353,9 @@ class AppointmentForm(forms.Form):
             datetime.combine(day, time.fromisoformat(slot_time)),
             timezone.get_current_timezone(),
         )
-        duration_minutes = max(service.duration_minutes for service in services)
-
         self.instance.client = client
         self.instance.start_at = start_at
-        self.instance.end_at = start_at + timedelta(minutes=duration_minutes)
+        self.instance.end_at = agenda_end_at_for_slot(start_at)
         self.instance.status = status
         self.instance.internal_notes = internal_notes
         self._selected_services = services

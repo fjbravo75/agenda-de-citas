@@ -30,10 +30,10 @@ from .models import (
     Appointment,
     AvailabilityBlock,
     Client,
-    DEFAULT_SERVICE_DURATION_MINUTES,
     ManualClosure,
     OfficialHoliday,
     Service,
+    agenda_end_at_for_slot,
     agenda_slot_operational_state_map,
 )
 from .views import _format_compact_day
@@ -44,8 +44,8 @@ class AgendaBaseTestCase(TestCase):
         super().setUp()
         self.real_today = timezone.localdate()
         self.operational_day = self._next_working_day(include_today=True)
-        self.review_service = Service.objects.create(name="Revision", duration_minutes=45, color="#3158D7")
-        self.control_service = Service.objects.create(name="Control", duration_minutes=30, color="#2E7A58")
+        self.review_service = Service.objects.create(name="Revision", color="#3158D7")
+        self.control_service = Service.objects.create(name="Control", color="#2E7A58")
         self.primary_client = Client.objects.create(name="Claudia Real")
         self.secondary_client = Client.objects.create(name="Mario Real")
         self.tertiary_client = Client.objects.create(name="Nora Real")
@@ -65,7 +65,7 @@ class AgendaBaseTestCase(TestCase):
         return Appointment(
             client=client,
             start_at=start_at,
-            end_at=start_at + timedelta(minutes=service.duration_minutes),
+            end_at=agenda_end_at_for_slot(start_at),
             status=status,
         )
 
@@ -170,10 +170,8 @@ class AppointmentSlotValidationTests(AgendaBaseTestCase):
         self.assertIn("no puede crearse ya cancelada", str(raised.exception))
         self.assertEqual(Appointment.objects.count(), 0)
 
-    def test_long_service_duration_does_not_block_next_slot_when_capacity_exists(self):
+    def test_appointments_keep_slot_based_validation_independent_from_service_catalog(self):
         today = self.operational_day
-        self.review_service.duration_minutes = 120
-        self.review_service.save(update_fields=["duration_minutes"])
 
         first_appointment = self._create_appointment(
             self.primary_client,
@@ -193,7 +191,8 @@ class AppointmentSlotValidationTests(AgendaBaseTestCase):
         second_appointment.save()
         first_appointment.refresh_from_db()
 
-        self.assertGreater(first_appointment.end_at, second_appointment.start_at)
+        self.assertEqual(first_appointment.end_at, agenda_end_at_for_slot(first_appointment.start_at))
+        self.assertEqual(second_appointment.end_at, agenda_end_at_for_slot(second_appointment.start_at))
         self.assertEqual(Appointment.objects.count(), 2)
         self.assertEqual(Appointment.active_slot_appointments_count(today, "09:00"), 1)
         self.assertEqual(Appointment.active_slot_appointments_count(today, "10:00"), 1)
@@ -768,7 +767,6 @@ class ServiceFormTests(TestCase):
         self.assertEqual(service.name, "Primera consulta")
         self.assertEqual(service.description, "Sesion inicial para valorar el caso.")
         self.assertTrue(service.is_active)
-        self.assertEqual(service.duration_minutes, DEFAULT_SERVICE_DURATION_MINUTES)
         self.assertEqual(service.color, "")
         self.assertEqual(list(form.fields), ["name", "description"])
 
@@ -1145,7 +1143,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(appointment.slot_day, today)
         self.assertEqual(appointment.slot_time, "11:00")
 
-    def test_create_view_can_create_appointment_with_multiple_services_and_max_duration_end_at(self):
+    def test_create_view_can_create_appointment_with_multiple_services_without_service_duration_semantics(self):
         today = self.operational_day
 
         response = self.client.post(
@@ -1161,7 +1159,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             self._appointment_service_ids(appointment),
             [self.review_service.pk, self.control_service.pk],
         )
-        self.assertEqual(appointment.end_at, appointment.start_at + timedelta(minutes=45))
+        self.assertEqual(appointment.end_at, agenda_end_at_for_slot(appointment.start_at))
 
         agenda_response = self.client.get(
             reverse("core:app_entrypoint"),
@@ -1174,10 +1172,8 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         history_response = self.client.get(reverse("core:client_detail", args=[self.primary_client.pk]))
         self.assertContains(history_response, "Varios servicios")
 
-    def test_create_view_keeps_slot_based_validation_even_when_another_service_runs_long(self):
+    def test_create_view_keeps_slot_based_validation_across_consecutive_slots(self):
         today = self.operational_day
-        self.review_service.duration_minutes = 120
-        self.review_service.save(update_fields=["duration_minutes"])
         first_appointment = self._create_appointment(
             self.primary_client,
             self.review_service,
@@ -1199,7 +1195,8 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(Appointment.objects.count(), 2)
         created_appointment = Appointment.objects.exclude(pk=first_appointment.pk).get()
         self.assertEqual(created_appointment.slot_time, "10:00")
-        self.assertGreater(first_appointment.end_at, created_appointment.start_at)
+        self.assertEqual(first_appointment.end_at, agenda_end_at_for_slot(first_appointment.start_at))
+        self.assertEqual(created_appointment.end_at, agenda_end_at_for_slot(created_appointment.start_at))
 
     def test_create_view_uses_agenda_layout_structure_for_new_screen(self):
         today = self.operational_day
@@ -1993,7 +1990,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(appointment.internal_notes, "Cambio valido")
         self.assertEqual(self._appointment_service_ids(appointment), [self.control_service.pk])
 
-    def test_update_view_can_store_multiple_services_and_uses_max_duration_end_at(self):
+    def test_update_view_can_store_multiple_services_without_service_duration_semantics(self):
         today = self.operational_day
         appointment = self._create_appointment(
             self.primary_client,
@@ -2021,7 +2018,7 @@ class AppointmentFlowViewTests(AuthenticatedAgendaBaseTestCase):
             self._appointment_service_ids(appointment),
             [self.review_service.pk, self.control_service.pk],
         )
-        self.assertEqual(appointment.end_at, appointment.start_at + timedelta(minutes=45))
+        self.assertEqual(appointment.end_at, agenda_end_at_for_slot(appointment.start_at))
 
     def test_update_view_rejects_move_to_non_operational_day(self):
         working_day = self._next_weekday(2)
@@ -2687,7 +2684,7 @@ class ClientDetailViewTests(AuthenticatedAgendaBaseTestCase):
     def test_client_detail_view_renders_history_in_descending_order_with_active_and_cancelled_appointments(self):
         today = self.operational_day
         previous_day = self._previous_working_day(start_day=today)
-        evaluation_service = Service.objects.create(name="Evaluacion", duration_minutes=60, color="#AE4C42")
+        evaluation_service = Service.objects.create(name="Evaluacion", color="#AE4C42")
 
         newest_appointment = self._create_appointment(
             self.primary_client,
@@ -4157,7 +4154,6 @@ class ServiceSettingsViewTests(AuthenticatedAgendaBaseTestCase):
         service = Service.objects.get(name="Primera consulta")
         self.assertEqual(service.description, "Sesion inicial para valorar el caso.")
         self.assertTrue(service.is_active)
-        self.assertEqual(service.duration_minutes, DEFAULT_SERVICE_DURATION_MINUTES)
         self.assertEqual(service.color, "")
 
     def test_service_update_view_updates_name_and_description(self):

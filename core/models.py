@@ -1,7 +1,7 @@
 from datetime import datetime, time, timedelta
 
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator, RegexValidator
+from django.core.validators import RegexValidator
 from django.db import models, transaction
 from django.db.models import F, Q
 from django.utils import timezone
@@ -16,7 +16,7 @@ AGENDA_SLOT_TIMES = ("09:00", "10:00", "11:00", "12:00", "13:00", "16:00", "17:0
 AGENDA_SLOT_TIME_CHOICES = tuple((slot_time, slot_time) for slot_time in AGENDA_SLOT_TIMES)
 AGENDA_SLOT_VALUES = tuple(time.fromisoformat(slot_time) for slot_time in AGENDA_SLOT_TIMES)
 DEFAULT_SLOT_CAPACITY = 3
-DEFAULT_SERVICE_DURATION_MINUTES = 30
+AGENDA_APPOINTMENT_END_OFFSET = timedelta(hours=1)
 
 
 class AgendaSettings(models.Model):
@@ -275,10 +275,6 @@ class ServiceQuerySet(models.QuerySet):
 class Service(models.Model):
     name = models.CharField(max_length=120)
     description = models.TextField(blank=True)
-    duration_minutes = models.PositiveIntegerField(
-        default=DEFAULT_SERVICE_DURATION_MINUTES,
-        validators=[MinValueValidator(5)],
-    )
     color = models.CharField(max_length=7, blank=True, validators=[HEX_COLOR_VALIDATOR])
     is_active = models.BooleanField(default=True, db_index=True)
 
@@ -472,3 +468,7 @@ def agenda_slot_operational_state_map(target_day, exclude_pk=None):
         }
 
     return slot_state_map
+
+
+def agenda_end_at_for_slot(start_at):
+    return start_at + AGENDA_APPOINTMENT_END_OFFSET

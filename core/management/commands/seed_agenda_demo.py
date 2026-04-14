@@ -1,221 +1,395 @@
 from datetime import datetime, time, timedelta
+from itertools import cycle
+from zoneinfo import ZoneInfo
 
-from django.core.management.base import BaseCommand, CommandError
+from django.contrib.auth import get_user_model
+from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
 from core.day_availability import DayAvailabilityResolver
-from core.models import Appointment, AvailabilityBlock, Client, Service, agenda_end_at_for_slot
+from core.models import (
+    AGENDA_SLOT_TIMES,
+    AgendaSettings,
+    Appointment,
+    AvailabilityBlock,
+    BusinessSettings,
+    Client,
+    ManualClosure,
+    OfficialHoliday,
+    Service,
+    agenda_end_at_for_slot,
+)
+
+
+DEMO_TIMEZONE = ZoneInfo("Europe/Madrid")
+DEMO_USERNAME = "demo@estudionorte.demo"
+DEMO_EMAIL = "demo@estudionorte.demo"
+DEMO_PASSWORD = "demo-estudio-norte-2026"
+DEMO_FULL_NAME = "Demo Estudio Norte"
+
+DEMO_BUSINESS_SETTINGS = {
+    "business_name": "Estudio Norte Peluquería",
+    "phone": "952 48 36 20",
+    "email": "hola@estudionorte.demo",
+    "address": "Calle Primavera 18",
+    "city": "Málaga",
+    "tax_id": "B29765431",
+}
+
+DEMO_SERVICE_DEFINITIONS = (
+    ("Corte mujer", 45, "#9C6644"),
+    ("Lavar y peinar", 45, "#C97B63"),
+    ("Tinte raíz", 90, "#8C5E58"),
+    ("Color completo", 120, "#B56576"),
+    ("Mechas", 150, "#E09F3E"),
+    ("Corte y peinado", 60, "#6C8EAD"),
+    ("Corte hombre", 30, "#355070"),
+    ("Corte + barba", 45, "#4D908E"),
+    ("Arreglo de barba", 30, "#577590"),
+    ("Corte infantil", 30, "#90BE6D"),
+    ("Tratamiento capilar", 60, "#7B6D8D"),
+    ("Recogido / peinado especial", 75, "#D17A22"),
+)
+
+ACTIVE_REGULAR_CLIENTS = (
+    "Lucia Martin",
+    "Carmen Ruiz",
+    "Paula Navarro",
+    "Elena Torres",
+    "Sofia Jimenez",
+    "Marta Leon",
+    "Alba Castro",
+    "Nuria Molina",
+    "Aitana Rojas",
+    "Claudia Vega",
+    "Marina Serrano",
+    "Sara Campos",
+    "Laura Prieto",
+    "Andrea Vidal",
+    "Noelia Cano",
+    "Beatriz Lozano",
+    "Javier Romero",
+    "Daniel Ortega",
+    "Alejandro Gil",
+    "Carlos Fuentes",
+    "Miguel Arias",
+    "Antonio Vera",
+    "Raul Mendez",
+    "Pablo Nuñez",
+)
+
+ACTIVE_OCCASIONAL_CLIENTS = (
+    "Irene Soler",
+    "Patricia Esteban",
+    "Veronica Rey",
+    "Cristina Cabrera",
+    "Monica Benitez",
+    "Hugo Pastor",
+    "Ivan Salas",
+    "Adrian Ponce",
+)
+
+ARCHIVED_CLIENTS = (
+    "Silvia Dominguez",
+    "Rocio Herrera",
+    "Tomas Gallego",
+    "Joaquin Roldan",
+)
+
+DEMO_APPOINTMENT_PLAN = (
+    (-24, "CCX", ("09:00", "12:00", "17:00")),
+    (-20, "CCC", ("10:00", "13:00", "18:00")),
+    (-16, "CCP", ("09:00", "11:00", "16:00")),
+    (-12, "CCC", ("10:00", "12:00", "17:00")),
+    (-8, "CCP", ("09:00", "13:00", "18:00")),
+    (-6, "CCP", ("10:00", "12:00", "16:00")),
+    (-4, "CCC", ("09:00", "11:00", "17:00")),
+    (-2, "CCX", ("10:00", "13:00", "18:00")),
+    (0, "CCP", ("09:00", "12:00", "17:00")),
+    (1, "CCP", ("10:00", "13:00", "18:00")),
+    (3, "CCC", ("09:00", "11:00", "16:00")),
+    (5, "CPX", ("10:00", "12:00", "17:00")),
+    (7, "CCP", ("09:00", "13:00", "18:00")),
+    (10, "PPX", ("10:00", "12:00", "16:00")),
+    (14, "CCC", ("09:00", "11:00", "17:00")),
+    (20, "CCP", ("10:00", "13:00", "18:00")),
+)
 
 
 class Command(BaseCommand):
-    help = "Create a reproducible demo dataset for the agenda."
+    help = "Seed the shared demo dataset for Agenda de Citas."
 
     def add_arguments(self, parser):
         parser.add_argument(
             "--reset",
             action="store_true",
-            help="Delete existing clients, services, appointments and blocks before recreating the demo dataset.",
+            help="Accepted for backwards compatibility. The command already recreates the demo dataset from scratch.",
         )
 
     def handle(self, *args, **options):
-        reset = options["reset"]
-
-        if not reset and self._has_existing_data():
-            raise CommandError(
-                "Existing agenda data found. Re-run with --reset if you want to replace it with the demo dataset."
-            )
+        reference_day = self._reference_day()
 
         with transaction.atomic():
-            if reset:
-                AvailabilityBlock.objects.all().delete()
-                Appointment.objects.all().delete()
-                Service.objects.all().delete()
-                Client.objects.all().delete()
-
-            dataset = self._build_dataset()
-            clients = self._create_clients(dataset["clients"])
-            services = self._create_services(dataset["services"])
-            block_count = self._create_availability_blocks(dataset["availability_blocks"])
-            created_appointments = self._create_appointments(dataset["appointments"], clients, services)
+            self._reset_demo_scope()
+            self._configure_agenda_settings()
+            self._configure_business_settings()
+            self._configure_demo_user()
+            services = self._create_services()
+            clients = self._create_clients()
+            manual_closures = self._create_manual_closures(reference_day)
+            block_count = self._create_availability_blocks(reference_day)
+            appointment_count = self._create_appointments(reference_day, clients, services)
 
         self.stdout.write(
             self.style.SUCCESS(
                 "Agenda demo loaded: "
-                f"{len(clients)} clients, "
-                f"{len(services)} services, "
-                f"{block_count} blocks, "
-                f"{created_appointments} appointments."
+                f"business=1, "
+                f"user=1, "
+                f"services={len(services)}, "
+                f"clients={len(clients)}, "
+                f"manual_closures={len(manual_closures)}, "
+                f"blocks={block_count}, "
+                f"appointments={appointment_count}."
             )
         )
 
-    def _has_existing_data(self):
-        return (
-            Client.objects.exists()
-            or Service.objects.exists()
-            or Appointment.objects.exists()
-            or AvailabilityBlock.objects.exists()
+    def _reference_day(self):
+        return timezone.now().astimezone(DEMO_TIMEZONE).date()
+
+    def _reset_demo_scope(self):
+        AvailabilityBlock.objects.all().delete()
+        Appointment.objects.all().delete()
+        ManualClosure.objects.all().delete()
+        OfficialHoliday.objects.all().delete()
+        Service.objects.all().delete()
+        Client.objects.all().delete()
+
+    def _configure_agenda_settings(self):
+        AgendaSettings.objects.update_or_create(
+            pk=1,
+            defaults={
+                "saturdays_non_working": True,
+                "sundays_non_working": True,
+                "official_holidays_non_working": True,
+                "last_boe_sync_at": None,
+                "last_boe_sync_year": None,
+                "last_boe_sync_resolution_identifier": "",
+                "last_boe_sync_resolution_title": "",
+                "last_boe_sync_resolution_url": "",
+                "last_boe_sync_created_count": None,
+                "last_boe_sync_skipped_existing_count": None,
+                "last_boe_sync_error_count": None,
+                "last_boe_sync_failure_at": None,
+                "last_boe_sync_failure_year": None,
+                "last_boe_sync_failure_message": "",
+            },
         )
 
-    def _next_working_days(self, start_day, *, count):
-        working_days = []
-        candidate_day = start_day
+    def _configure_business_settings(self):
+        BusinessSettings.objects.update_or_create(
+            pk=1,
+            defaults=DEMO_BUSINESS_SETTINGS,
+        )
 
-        while len(working_days) < count:
-            if DayAvailabilityResolver.resolve_for_global_agenda(candidate_day).is_working_day:
-                working_days.append(candidate_day)
-            candidate_day += timedelta(days=1)
+    def _configure_demo_user(self):
+        user_model = get_user_model()
+        user, _created = user_model.objects.update_or_create(
+            username=DEMO_USERNAME,
+            defaults={
+                "email": DEMO_EMAIL,
+                "first_name": "Demo",
+                "last_name": "Estudio Norte",
+                "is_active": True,
+                "is_staff": False,
+                "is_superuser": False,
+            },
+        )
+        user.set_password(DEMO_PASSWORD)
+        if hasattr(user, "full_name"):
+            user.full_name = DEMO_FULL_NAME
+        user.save()
+        return user
 
-            if (candidate_day - start_day).days > 60:
-                raise CommandError("Unable to find enough working days to build the demo agenda dataset.")
-
-        return working_days
-
-    def _build_dataset(self):
-        working_days = self._next_working_days(timezone.localdate(), count=5)
-        demo_days = {
-            "today": working_days[0],
-            "next_day": working_days[1],
-            "two_days": working_days[2],
-            "four_days": working_days[3],
-            "one_week": working_days[4],
-        }
-
-        return {
-            "clients": [
-                {"name": "Paula Martin", "phone": "+34 600 111 111", "email": "paula@example.com"},
-                {"name": "Diego Lara", "phone": "+34 600 222 222", "email": "diego@example.com"},
-                {"name": "Marta Leon", "phone": "+34 600 333 333", "email": "marta@example.com"},
-                {"name": "Carlos Ruiz", "phone": "+34 600 444 444", "email": "carlos@example.com"},
-                {"name": "Sofia Marquez", "phone": "+34 600 555 555", "email": "sofia@example.com"},
-                {"name": "Lucia Gomez", "phone": "+34 600 666 666", "email": "lucia@example.com"},
-                {"name": "Raul Soto", "phone": "+34 600 777 777", "email": "raul@example.com"},
-            ],
-            "services": [
-                {"name": "Fisio inicial", "color": "#3158D7"},
-                {"name": "Revision", "color": "#2E7A58"},
-                {"name": "Seguimiento", "color": "#A06A11"},
-                {"name": "Evaluacion", "color": "#AE4C42"},
-                {"name": "Control", "color": "#6D7A8C"},
-            ],
-            "availability_blocks": [
-                {"day": demo_days["today"], "slot_time": "16:00", "label": "Bloqueo interno"},
-                {"day": demo_days["next_day"], "slot_time": "11:00", "label": "Bloqueo puntual"},
-                {"day": demo_days["one_week"], "slot_time": "09:00", "label": "Bloqueo puntual"},
-            ],
-            "appointments": [
-                {
-                    "client": "Paula Martin",
-                    "service": "Revision",
-                    "day": demo_days["today"],
-                    "start_time": time(9, 0),
-                    "status": Appointment.Status.CONFIRMED,
-                },
-                {
-                    "client": "Diego Lara",
-                    "service": "Control",
-                    "day": demo_days["today"],
-                    "start_time": time(10, 0),
-                    "status": Appointment.Status.PENDING,
-                },
-                {
-                    "client": "Marta Leon",
-                    "service": "Seguimiento",
-                    "day": demo_days["today"],
-                    "start_time": time(12, 0),
-                    "status": Appointment.Status.CONFIRMED,
-                },
-                {
-                    "client": "Raul Soto",
-                    "service": "Revision",
-                    "day": demo_days["today"],
-                    "start_time": time(17, 0),
-                    "status": Appointment.Status.CANCELLED,
-                    "internal_notes": "Cancelada por el cliente",
-                },
-                {
-                    "client": "Carlos Ruiz",
-                    "service": "Revision",
-                    "day": demo_days["next_day"],
-                    "start_time": time(9, 0),
-                    "status": Appointment.Status.CONFIRMED,
-                },
-                {
-                    "client": "Sofia Marquez",
-                    "service": "Control",
-                    "day": demo_days["next_day"],
-                    "start_time": time(10, 0),
-                    "status": Appointment.Status.PENDING,
-                },
-                {
-                    "client": "Lucia Gomez",
-                    "service": "Evaluacion",
-                    "day": demo_days["two_days"],
-                    "start_time": time(17, 0),
-                    "status": Appointment.Status.CONFIRMED,
-                },
-                {
-                    "client": "Marta Leon",
-                    "service": "Fisio inicial",
-                    "day": demo_days["four_days"],
-                    "start_time": time(9, 0),
-                    "status": Appointment.Status.CONFIRMED,
-                },
-                {
-                    "client": "Paula Martin",
-                    "service": "Seguimiento",
-                    "day": demo_days["one_week"],
-                    "start_time": time(12, 0),
-                    "status": Appointment.Status.PENDING,
-                },
-            ],
-        }
-
-    def _create_clients(self, client_definitions):
-        clients = {}
-        for definition in client_definitions:
-            client = Client.objects.create(**definition)
-            clients[client.name] = client
-        return clients
-
-    def _create_services(self, service_definitions):
+    def _create_services(self):
         services = {}
-        for definition in service_definitions:
-            service = Service.objects.create(**definition)
-            services[service.name] = service
+        for name, duration_minutes, color in DEMO_SERVICE_DEFINITIONS:
+            service = Service.objects.create(
+                name=name,
+                description=f"Duracion orientativa demo: {duration_minutes} min.",
+                color=color,
+                is_active=True,
+            )
+            services[name] = service
         return services
 
-    def _create_availability_blocks(self, block_definitions):
+    def _create_clients(self):
+        clients = {}
+        for name in ACTIVE_REGULAR_CLIENTS:
+            clients[name] = Client.objects.create(
+                name=name,
+                phone=self._demo_phone(name),
+                email=self._demo_email(name),
+                notes="Cliente habitual demo.",
+                is_archived=False,
+            )
+
+        for name in ACTIVE_OCCASIONAL_CLIENTS:
+            clients[name] = Client.objects.create(
+                name=name,
+                phone=self._demo_phone(name),
+                email=self._demo_email(name),
+                notes="Cliente ocasional demo.",
+                is_archived=False,
+            )
+
+        for name in ARCHIVED_CLIENTS:
+            clients[name] = Client.objects.create(
+                name=name,
+                phone=self._demo_phone(name),
+                email=self._demo_email(name),
+                notes="Cliente archivado demo.",
+                is_archived=True,
+            )
+
+        return clients
+
+    def _create_manual_closures(self, reference_day):
+        one_day_closure = ManualClosure.objects.create(
+            start_date=self._seedable_day_for_offset(reference_day, -18),
+            end_date=self._seedable_day_for_offset(reference_day, -18),
+            reason_type=ManualClosure.ReasonType.BUSINESS_CLOSURE,
+            label="Inventario y mantenimiento",
+            notes="Cierre demo para mantenimiento interno del local.",
+        )
+
+        range_start = self._seedable_day_for_offset(reference_day, 15)
+        range_end = self._seedable_day_for_offset(reference_day, 16)
+        if range_end < range_start:
+            range_start, range_end = range_end, range_start
+
+        training_closure = ManualClosure.objects.create(
+            start_date=range_start,
+            end_date=range_end,
+            reason_type=ManualClosure.ReasonType.BUSINESS_CLOSURE,
+            label="Formacion avanzada de color",
+            notes="Cierre demo por formacion interna del equipo.",
+        )
+
+        return [one_day_closure, training_closure]
+
+    def _create_availability_blocks(self, reference_day):
+        block_definitions = (
+            (self._seedable_day_for_offset(reference_day, -11), "16:00", "Bloqueo puntual"),
+            (self._seedable_day_for_offset(reference_day, 2), "13:00", "Bloqueo puntual"),
+            (self._seedable_day_for_offset(reference_day, 17), "11:00", "Bloqueo puntual"),
+        )
+
         created = 0
-        for definition in block_definitions:
-            AvailabilityBlock.objects.create(**definition)
+        for day, slot_time, label in block_definitions:
+            AvailabilityBlock.objects.create(day=day, slot_time=slot_time, label=label)
             created += 1
         return created
 
-    def _create_appointments(self, appointment_definitions, clients, services):
-        current_tz = timezone.get_current_timezone()
+    def _create_appointments(self, reference_day, clients, services):
+        client_order = self._appointment_client_order()
+        archived_client_order = list(ARCHIVED_CLIENTS)
+        client_cycle = cycle(client_order)
+        service_cycle = cycle(name for name, _duration, _color in DEMO_SERVICE_DEFINITIONS)
+
         created = 0
-        for definition in appointment_definitions:
-            start_at = timezone.make_aware(
-                datetime.combine(definition["day"], definition["start_time"]),
-                current_tz,
-            )
-            target_status = definition["status"]
-            appointment = Appointment.objects.create(
-                client=clients[definition["client"]],
-                start_at=start_at,
-                end_at=agenda_end_at_for_slot(start_at),
-                status=(
-                    Appointment.Status.CONFIRMED
-                    if target_status == Appointment.Status.CANCELLED
-                    else target_status
-                ),
-                internal_notes=definition.get("internal_notes", ""),
-            )
-            service = services[definition["service"]]
-            appointment.services.set([service])
-            if target_status == Appointment.Status.CANCELLED:
-                appointment.status = Appointment.Status.CANCELLED
-                appointment.save()
-            created += 1
+        archived_remaining = archived_client_order[:]
+
+        for index, (offset, status_pattern, slot_times) in enumerate(DEMO_APPOINTMENT_PLAN):
+            target_day = self._seedable_day_for_offset(reference_day, offset)
+            for slot_index, (status_key, slot_time) in enumerate(zip(status_pattern, slot_times, strict=True)):
+                if archived_remaining and index < 2:
+                    client_name = archived_remaining.pop(0)
+                else:
+                    client_name = next(client_cycle)
+                service_name = next(service_cycle)
+                appointment = self._create_single_appointment(
+                    day=target_day,
+                    slot_time=slot_time,
+                    client=clients[client_name],
+                    service=services[service_name],
+                    status_key=status_key,
+                    internal_notes=self._build_internal_notes(status_key, service_name, slot_index),
+                )
+                created += 1
         return created
+
+    def _create_single_appointment(self, *, day, slot_time, client, service, status_key, internal_notes):
+        status = {
+            "C": Appointment.Status.CONFIRMED,
+            "P": Appointment.Status.PENDING,
+            "X": Appointment.Status.CANCELLED,
+        }[status_key]
+
+        start_at = timezone.make_aware(
+            datetime.combine(day, time.fromisoformat(slot_time)),
+            timezone.get_current_timezone(),
+        )
+        persisted_status = Appointment.Status.CONFIRMED if status == Appointment.Status.CANCELLED else status
+
+        appointment = Appointment.objects.create(
+            client=client,
+            start_at=start_at,
+            end_at=agenda_end_at_for_slot(start_at),
+            status=persisted_status,
+            internal_notes=internal_notes,
+        )
+        appointment.services.set([service])
+
+        if status == Appointment.Status.CANCELLED:
+            appointment.status = Appointment.Status.CANCELLED
+            appointment.save(update_fields=["status"])
+
+        return appointment
+
+    def _build_internal_notes(self, status_key, service_name, slot_index):
+        if status_key == "P":
+            return "Pendiente de confirmacion telefonica."
+        if status_key == "X":
+            return "Cancelada por reajuste de agenda demo."
+        if slot_index == 2 and service_name in {"Color completo", "Mechas", "Recogido / peinado especial"}:
+            return "Reserva demo de servicio de mayor dedicacion."
+        return ""
+
+    def _appointment_client_order(self):
+        return list(ACTIVE_REGULAR_CLIENTS) + list(ACTIVE_OCCASIONAL_CLIENTS)
+
+    def _seedable_day_for_offset(self, reference_day, offset):
+        target_day = reference_day + timedelta(days=offset)
+        lower_bound = reference_day - timedelta(days=28)
+        upper_bound = reference_day + timedelta(days=28)
+        step = 1 if offset >= 0 else -1
+
+        while lower_bound <= target_day <= upper_bound:
+            if DayAvailabilityResolver.resolve_for_global_agenda(target_day).is_working_day:
+                return target_day
+            target_day += timedelta(days=step or 1)
+
+        fallback_day = reference_day
+        while True:
+            if DayAvailabilityResolver.resolve_for_global_agenda(fallback_day).is_working_day:
+                return fallback_day
+            fallback_day += timedelta(days=1)
+
+    def _demo_phone(self, name):
+        normalized = sum(ord(character) for character in name if character.isalpha())
+        suffix = f"{normalized % 10000:04d}"
+        return f"+34 6{suffix[:3]} {suffix[1:]}"
+
+    def _demo_email(self, name):
+        slug = (
+            name.lower()
+            .replace("á", "a")
+            .replace("é", "e")
+            .replace("í", "i")
+            .replace("ó", "o")
+            .replace("ú", "u")
+            .replace("ñ", "n")
+            .replace(" ", ".")
+        )
+        return f"{slug}@estudionorte.demo"

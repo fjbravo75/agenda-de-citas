@@ -1108,6 +1108,13 @@ class SessionAccessAndLoginBrandingTests(AgendaBaseTestCase):
         self.assertContains(response, "Entrar")
         self.assertContains(response, "Usuario")
         self.assertContains(response, "Contrase")
+        self.assertContains(response, "Acceso demo")
+        self.assertContains(response, "demo@estudionorte.demo")
+        self.assertContains(response, "DemoAgenda2026!")
+        self.assertContains(
+            response,
+            "Demo interactiva con datos de ejemplo. Los cambios se reinician automáticamente cada día.",
+        )
         self.assertNotContains(response, "wagtail-login.css")
         self.assertNotContains(response, "Forgotten password")
         self.assertNotContains(response, "Remember me")
@@ -1128,6 +1135,7 @@ class SessionAccessAndLoginBrandingTests(AgendaBaseTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "Clinica Atlas")
+        self.assertNotContains(response, "Estudio Norte Peluquería")
         self.assertContains(response, "Agenda de Citas")
 
     def test_authenticated_user_visiting_login_redirects_to_app_entrypoint(self):
@@ -4882,14 +4890,153 @@ class OfficialHolidaySyncCommandTests(TestCase):
 
 
 class SeedAgendaDemoCommandTests(TestCase):
-    @patch("core.management.commands.seed_agenda_demo.timezone.localdate", return_value=date(2026, 4, 9))
-    def test_command_uses_only_working_days_for_seeded_appointments(self, _mocked_localdate):
+    @patch("core.management.commands.seed_agenda_demo.Command._reference_day", return_value=date(2026, 4, 14))
+    def test_command_seeds_complete_shared_demo_dataset(self, _mocked_reference_day):
         stdout = StringIO()
 
         call_command("seed_agenda_demo", stdout=stdout)
 
-        self.assertFalse(Appointment.objects.filter(start_at__date=date(2026, 4, 11)).exists())
-        self.assertFalse(Appointment.objects.filter(start_at__date=date(2026, 4, 12)).exists())
+        business_settings = BusinessSettings.objects.get(pk=1)
+        self.assertEqual(business_settings.business_name, "Estudio Norte Peluquería")
+        self.assertEqual(business_settings.phone, "952 48 36 20")
+        self.assertEqual(business_settings.email, "hola@estudionorte.demo")
+        self.assertEqual(business_settings.address, "Calle Primavera 18")
+        self.assertEqual(business_settings.city, "Málaga")
+        self.assertEqual(business_settings.tax_id, "B29765431")
+
+        demo_user = get_user_model().objects.get(username="demo@estudionorte.demo")
+        self.assertEqual(demo_user.email, "demo@estudionorte.demo")
+        self.assertTrue(demo_user.check_password("demo-estudio-norte-2026"))
+
+        self.assertEqual(Service.objects.count(), 12)
+        self.assertQuerySetEqual(
+            Service.objects.order_by("name").values_list("name", flat=True),
+            [
+                "Arreglo de barba",
+                "Color completo",
+                "Corte + barba",
+                "Corte hombre",
+                "Corte infantil",
+                "Corte mujer",
+                "Corte y peinado",
+                "Lavar y peinar",
+                "Mechas",
+                "Recogido / peinado especial",
+                "Tinte raíz",
+                "Tratamiento capilar",
+            ],
+            transform=lambda value: value,
+        )
+        self.assertTrue(all("Duracion orientativa demo:" in service.description for service in Service.objects.all()))
+
+        self.assertEqual(Client.objects.count(), 36)
+        self.assertEqual(Client.objects.active().count(), 32)
+        self.assertEqual(Client.objects.archived().count(), 4)
+
+        self.assertEqual(Appointment.objects.count(), 48)
+        self.assertEqual(Appointment.objects.filter(status=Appointment.Status.CONFIRMED).count(), 34)
+        self.assertEqual(Appointment.objects.filter(status=Appointment.Status.PENDING).count(), 10)
+        self.assertEqual(Appointment.objects.filter(status=Appointment.Status.CANCELLED).count(), 4)
+
+        self.assertEqual(AvailabilityBlock.objects.count(), 3)
+        self.assertEqual(ManualClosure.objects.count(), 2)
+        self.assertEqual(OfficialHoliday.objects.count(), 0)
+
+        first_appointment = Appointment.objects.order_by("start_at").first()
+        last_appointment = Appointment.objects.order_by("start_at").last()
+        self.assertIsNotNone(first_appointment)
+        self.assertIsNotNone(last_appointment)
+        self.assertGreaterEqual((first_appointment.slot_day - date(2026, 4, 14)).days, -28)
+        self.assertLessEqual((last_appointment.slot_day - date(2026, 4, 14)).days, 28)
+        self.assertTrue(Appointment.objects.filter(start_at__date__lt=date(2026, 4, 14)).exists())
+        self.assertTrue(Appointment.objects.filter(start_at__date__gt=date(2026, 4, 14)).exists())
+
         for appointment in Appointment.objects.all():
             resolved_day = DayAvailabilityResolver.resolve_for_global_agenda(appointment.slot_day)
             self.assertTrue(resolved_day.is_working_day)
+
+        self.assertIn("services=12", stdout.getvalue())
+        self.assertIn("clients=36", stdout.getvalue())
+        self.assertIn("manual_closures=2", stdout.getvalue())
+        self.assertIn("blocks=3", stdout.getvalue())
+        self.assertIn("appointments=48", stdout.getvalue())
+
+    @patch("core.management.commands.seed_agenda_demo.Command._reference_day", return_value=date(2026, 4, 14))
+    def test_command_is_idempotent_and_resets_demo_scope_cleanly(self, _mocked_reference_day):
+        BusinessSettings.objects.create(
+            business_name="Negocio previo",
+            phone="111 111 111",
+            email="anterior@example.com",
+            address="Calle Falsa 1",
+            city="Sevilla",
+            tax_id="B00000000",
+        )
+        OfficialHoliday.objects.create(day=date(2026, 4, 23), name="Festivo residual")
+        stray_client = Client.objects.create(name="Cliente residual", is_archived=False)
+        stray_service = Service.objects.create(name="Servicio residual", description="Temporal", is_active=True)
+        stray_start_at = timezone.make_aware(
+            datetime(2026, 4, 9, 9, 0),
+            timezone.get_current_timezone(),
+        )
+        stray_appointment = Appointment.objects.create(
+            client=stray_client,
+            start_at=stray_start_at,
+            end_at=agenda_end_at_for_slot(stray_start_at),
+            status=Appointment.Status.CONFIRMED,
+        )
+        stray_appointment.services.set([stray_service])
+        AvailabilityBlock.objects.create(day=date(2026, 4, 9), slot_time="10:00", label="Bloqueo residual")
+        ManualClosure.objects.create(
+            start_date=date(2026, 4, 21),
+            end_date=date(2026, 4, 21),
+            reason_type=ManualClosure.ReasonType.OTHER,
+            label="Cierre residual",
+        )
+        demo_user = get_user_model().objects.create_user(
+            username="demo@estudionorte.demo",
+            email="old-demo@example.com",
+            password="old-password",
+            is_active=False,
+        )
+
+        call_command("seed_agenda_demo")
+        first_signature = {
+            "business_name": BusinessSettings.objects.get(pk=1).business_name,
+            "service_names": list(Service.objects.order_by("name").values_list("name", flat=True)),
+            "client_counts": (Client.objects.active().count(), Client.objects.archived().count()),
+            "appointment_counts": (
+                Appointment.objects.filter(status=Appointment.Status.CONFIRMED).count(),
+                Appointment.objects.filter(status=Appointment.Status.PENDING).count(),
+                Appointment.objects.filter(status=Appointment.Status.CANCELLED).count(),
+            ),
+            "block_count": AvailabilityBlock.objects.count(),
+            "manual_closure_count": ManualClosure.objects.count(),
+            "holiday_count": OfficialHoliday.objects.count(),
+        }
+
+        call_command("seed_agenda_demo")
+
+        demo_user.refresh_from_db()
+        self.assertEqual(demo_user.email, "demo@estudionorte.demo")
+        self.assertTrue(demo_user.is_active)
+        self.assertTrue(demo_user.check_password("demo-estudio-norte-2026"))
+        self.assertEqual(get_user_model().objects.filter(username="demo@estudionorte.demo").count(), 1)
+        self.assertFalse(Client.objects.filter(name="Cliente residual").exists())
+        self.assertFalse(Service.objects.filter(name="Servicio residual").exists())
+        self.assertEqual(OfficialHoliday.objects.count(), 0)
+
+        second_signature = {
+            "business_name": BusinessSettings.objects.get(pk=1).business_name,
+            "service_names": list(Service.objects.order_by("name").values_list("name", flat=True)),
+            "client_counts": (Client.objects.active().count(), Client.objects.archived().count()),
+            "appointment_counts": (
+                Appointment.objects.filter(status=Appointment.Status.CONFIRMED).count(),
+                Appointment.objects.filter(status=Appointment.Status.PENDING).count(),
+                Appointment.objects.filter(status=Appointment.Status.CANCELLED).count(),
+            ),
+            "block_count": AvailabilityBlock.objects.count(),
+            "manual_closure_count": ManualClosure.objects.count(),
+            "holiday_count": OfficialHoliday.objects.count(),
+        }
+
+        self.assertEqual(first_signature, second_signature)

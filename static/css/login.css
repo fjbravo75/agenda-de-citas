@@ -216,6 +216,75 @@
     margin-top: 18px;
 }
 
+.access-demo-card {
+    display: grid;
+    gap: 10px;
+    margin-top: 18px;
+    padding: 14px 14px 13px;
+    border: 1px solid rgba(25, 39, 52, 0.1);
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(246, 247, 249, 0.96), rgba(255, 255, 255, 0.98));
+}
+
+.access-demo-card__header {
+    display: grid;
+    gap: 4px;
+}
+
+.access-demo-card__header .eyebrow,
+.access-demo-card__header h3,
+.access-demo-card__copy,
+.access-demo-card__credentials {
+    margin: 0;
+}
+
+.access-demo-card__header h3 {
+    font-size: 16px;
+    line-height: 1.2;
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+.access-demo-card__credentials {
+    display: grid;
+    gap: 8px;
+}
+
+.access-demo-card__row {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 10px;
+    align-items: baseline;
+}
+
+.access-demo-card__row dt {
+    font-size: 12px;
+    line-height: 1.35;
+    font-weight: 600;
+    color: var(--color-text-muted);
+}
+
+.access-demo-card__row dd {
+    margin: 0;
+}
+
+.access-demo-card__row code {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: rgba(25, 39, 52, 0.06);
+    color: var(--color-text);
+    font-size: 13px;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.access-demo-card__copy {
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--color-text-muted);
+}
+
 .access-login-messages ul {
     display: grid;
     gap: 10px;
@@ -306,6 +375,11 @@
 
     .access-login-panel {
         padding: 20px;
+    }
+
+    .access-demo-card__row {
+        grid-template-columns: 1fr;
+        gap: 4px;
     }
 
     .access-page__footer .footer-row {

@@ -5,6 +5,7 @@
 {% block body_class %}theme-root theme-app app-settings-screen{% endblock %}
 
 {% block content %}
+<div class="settings-shell">
 <section class="section-stack">
     <header class="page-header">
         <div class="page-header__copy">
@@ -91,40 +92,30 @@
         </div>
 
         {% if manual_closures %}
-        <div class="table-wrap">
-            <table class="table table--compact">
-                <thead>
-                    <tr>
-                        <th>Etiqueta</th>
-                        <th>Fechas</th>
-                        <th>Motivo</th>
-                        <th>Notas</th>
-                        <th>Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for manual_closure in manual_closures %}
-                    <tr>
-                        <td><strong>{{ manual_closure.display_label }}</strong></td>
-                        <td>
-                            {% if manual_closure.start_date == manual_closure.end_date %}
-                            {{ manual_closure.start_date|date:"d/m/Y" }}
-                            {% else %}
-                            {{ manual_closure.start_date|date:"d/m/Y" }} a {{ manual_closure.end_date|date:"d/m/Y" }}
-                            {% endif %}
-                        </td>
-                        <td>{{ manual_closure.get_reason_type_display }}</td>
-                        <td>{{ manual_closure.notes|default:"-" }}</td>
-                        <td>
-                            <div class="page-actions agenda-settings__table-actions">
-                                <a class="button button--secondary" href="{% url 'core:manual_closure_update' manual_closure.pk %}">Editar</a>
-                                <a class="button button--ghost" href="{% url 'core:manual_closure_delete' manual_closure.pk %}">Eliminar</a>
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <div class="agenda-settings__manual-closures-list" role="list" aria-label="Resumen de cierres manuales">
+            {% for manual_closure in manual_closures %}
+            <article class="agenda-settings__manual-closure-item" role="listitem">
+                <div class="agenda-settings__manual-closure-topline">
+                    <p class="agenda-settings__manual-closure-label"><strong>{{ manual_closure.display_label }}</strong></p>
+                    <div class="page-actions agenda-settings__manual-closure-actions">
+                        <a class="button button--secondary" href="{% url 'core:manual_closure_update' manual_closure.pk %}">Editar</a>
+                        <a class="button button--ghost" href="{% url 'core:manual_closure_delete' manual_closure.pk %}">Eliminar</a>
+                    </div>
+                </div>
+
+                <p class="agenda-settings__manual-closure-dates">
+                    {% if manual_closure.start_date == manual_closure.end_date %}
+                    {{ manual_closure.start_date|date:"d/m/Y" }}
+                    {% else %}
+                    {{ manual_closure.start_date|date:"d/m/Y" }} a {{ manual_closure.end_date|date:"d/m/Y" }}
+                    {% endif %}
+                </p>
+
+                {% if manual_closure.get_reason_type_display %}
+                <p class="agenda-settings__manual-closure-reason">{{ manual_closure.get_reason_type_display }}</p>
+                {% endif %}
+            </article>
+            {% endfor %}
         </div>
         {% else %}
         <div class="empty-state">
@@ -292,4 +283,5 @@
         {% endif %}
     </article>
 </section>
+</div>
 {% endblock %}

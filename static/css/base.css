@@ -22,6 +22,7 @@
     --color-danger: #ae4c42;
     --color-danger-soft: #faefed;
     --container-width: 1120px;
+    --settings-content-width: 780px;
     --radius-card: 10px;
     --radius-surface: 12px;
 }
@@ -543,65 +544,83 @@ h3 {
     color: var(--color-line-strong);
 }
 
-.settings-index {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-    gap: 20px;
+.app-settings-screen .settings-shell {
+    width: min(100%, var(--settings-content-width));
+    margin-inline: auto;
 }
 
-.settings-index__group {
+.app-settings-screen .settings-index__stack {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 32px;
+}
+
+.app-settings-screen .settings-index__group {
+    width: 100%;
     align-content: start;
-    gap: 18px;
+    gap: 12px;
+    padding: 18px 20px;
 }
 
-.settings-index__links {
+.app-settings-screen .settings-index__links {
     display: grid;
     gap: 0;
     border-top: 1px solid var(--color-line);
 }
 
-.settings-index__link {
-    display: flex;
+.app-settings-screen .settings-index__link {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 14px 0;
+    column-gap: 12px;
+    padding: 10px 0;
     border-bottom: 1px solid var(--color-line);
     color: inherit;
 }
 
-.settings-index__link:last-child {
+.app-settings-screen .settings-index__link:last-child {
     border-bottom: none;
     padding-bottom: 0;
 }
 
-.settings-index__link:hover .settings-index__link-action,
-.settings-index__link:focus-visible .settings-index__link-action {
+.app-settings-screen .settings-index__link:hover .settings-index__link-action,
+.app-settings-screen .settings-index__link:focus-visible .settings-index__link-action {
     color: var(--color-accent-strong);
 }
 
-.settings-index__link-copy {
+.app-settings-screen .settings-index__link-copy {
     display: grid;
     gap: 4px;
     min-width: 0;
 }
 
-.settings-index__link-copy strong {
+.app-settings-screen .settings-index__link-copy strong {
     font-size: 15px;
     line-height: 1.25;
 }
 
-.settings-index__link-copy span {
-    font-size: 13px;
-    line-height: 1.35;
+.app-settings-screen .settings-index__link-copy span {
+    font-size: 14px;
+    line-height: 1.4;
     color: var(--color-text-muted);
 }
 
-.settings-index__link-action {
-    flex-shrink: 0;
+.app-settings-screen .settings-index__link-action {
+    justify-self: end;
     font-size: 13px;
     font-weight: 600;
     color: var(--color-accent);
+    white-space: nowrap;
+}
+
+.business-settings__grid {
+    gap: 16px 20px;
+}
+
+.business-settings__field input {
+    min-height: 40px;
+    height: 40px;
 }
 
 .service-catalog__list {
@@ -2068,6 +2087,73 @@ h3 {
 .agenda-settings__actions,
 .agenda-settings__table-actions {
     justify-content: flex-end;
+}
+
+.agenda-settings__manual-closures-list {
+    display: grid;
+    gap: 0;
+    border-top: 1px solid var(--color-line);
+}
+
+.agenda-settings__manual-closure-item {
+    display: grid;
+    gap: 6px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--color-line);
+}
+
+.agenda-settings__manual-closure-item:last-child {
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.agenda-settings__manual-closure-topline {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 12px;
+}
+
+.agenda-settings__manual-closure-label,
+.agenda-settings__manual-closure-dates,
+.agenda-settings__manual-closure-reason {
+    min-width: 0;
+}
+
+.agenda-settings__manual-closure-label strong {
+    font-size: 15px;
+    line-height: 1.25;
+    color: var(--color-text);
+}
+
+.agenda-settings__manual-closure-dates,
+.agenda-settings__manual-closure-reason {
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--color-text-muted);
+}
+
+.agenda-settings__manual-closure-dates {
+    white-space: nowrap;
+}
+
+.agenda-settings__manual-closure-actions {
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    gap: 12px;
+    white-space: nowrap;
+}
+
+.manual-closure-form__grid > .field {
+    align-content: start;
+}
+
+.app-settings-screen #cierres-manuales .page-actions {
+    flex-shrink: 0;
+}
+
+.app-settings-screen #cierres-manuales .page-actions .button {
+    white-space: nowrap;
 }
 
 .agenda-settings__sync-shell {

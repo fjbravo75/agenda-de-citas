@@ -72,6 +72,49 @@ class AgendaSettings(models.Model):
         return super().save(*args, **kwargs)
 
 
+class BusinessSettings(models.Model):
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    business_name = models.CharField(max_length=160, blank=True)
+    phone = models.CharField(max_length=32, blank=True)
+    email = models.EmailField(blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    city = models.CharField(max_length=120, blank=True)
+    tax_id = models.CharField(max_length=32, blank=True)
+
+    class Meta:
+        verbose_name = "datos del negocio"
+        verbose_name_plural = "datos del negocio"
+
+    def __str__(self):
+        return self.display_name or "Datos del negocio"
+
+    @property
+    def display_name(self):
+        return (self.business_name or "").strip()
+
+    @property
+    def is_configured(self):
+        return bool(self.display_name)
+
+    @classmethod
+    def get_solo(cls, *, create=False):
+        if create:
+            settings, _created = cls.objects.get_or_create(pk=1)
+            return settings
+        return cls.objects.filter(pk=1).first()
+
+    def clean(self):
+        super().clean()
+        if self.pk not in (None, 1):
+            raise ValidationError(
+                {"id": "Los datos del negocio deben usar el identificador fijo 1."}
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
 class ManualClosureQuerySet(models.QuerySet):
     def covering_day(self, target_day):
         return self.filter(start_date__lte=target_day, end_date__gte=target_day)

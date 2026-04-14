@@ -5,36 +5,40 @@
 {% block body_class %}theme-root theme-app app-settings-screen{% endblock %}
 
 {% block content %}
+<div class="settings-shell">
 <section class="section-stack">
     <header class="page-header">
         <div class="page-header__copy">
             <h1>Ajustes</h1>
-            <p class="text-secondary">Configura el funcionamiento de tu agenda y los servicios que ofreces.</p>
+            <p class="text-secondary">Configura tu negocio, la agenda y los servicios desde un solo sitio.</p>
         </div>
     </header>
 </section>
 
-<section class="section-stack settings-index">
-    {% for group in settings_groups %}
-    <article class="section-surface settings-index__group">
-        <div class="stack-sm">
-            <p class="eyebrow">Configuracion</p>
-            <h2>{{ group.title }}</h2>
-            <p class="text-secondary">{{ group.description }}</p>
-        </div>
+<section class="section-stack">
+    <div class="settings-index__stack">
+        {% for group in settings_groups %}
+        <article class="section-surface settings-index__group">
+            <div class="stack-sm">
+                <p class="eyebrow">Configuracion</p>
+                <h2>{{ group.title }}</h2>
+                <p class="text-secondary">{{ group.description }}</p>
+            </div>
 
-        <div class="settings-index__links">
-            {% for item in group.items %}
-            <a class="settings-index__link" href="{{ item.url }}">
-                <span class="settings-index__link-copy">
-                    <strong>{{ item.label }}</strong>
-                    <span>{{ item.description }}</span>
-                </span>
-                <span class="settings-index__link-action">Abrir</span>
-            </a>
-            {% endfor %}
-        </div>
-    </article>
-    {% endfor %}
+            <div class="settings-index__links">
+                {% for item in group.items %}
+                <a class="settings-index__link" href="{{ item.url }}">
+                    <span class="settings-index__link-copy">
+                        <strong>{{ item.label }}</strong>
+                        <span>{{ item.description }}</span>
+                    </span>
+                    <span class="settings-index__link-action">Abrir</span>
+                </a>
+                {% endfor %}
+            </div>
+        </article>
+        {% endfor %}
+    </div>
 </section>
+</div>
 {% endblock %}

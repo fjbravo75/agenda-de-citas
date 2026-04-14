@@ -21,6 +21,7 @@ from .day_availability import DayAvailabilityResolver
 from .forms import (
     AgendaSettingsForm,
     AppointmentForm,
+    BusinessSettingsForm,
     ManualClosureForm,
     OfficialHolidaySyncForm,
     ServiceForm,
@@ -29,6 +30,7 @@ from .models import (
     AgendaSettings,
     Appointment,
     AvailabilityBlock,
+    BusinessSettings,
     Client,
     ManualClosure,
     OfficialHoliday,
@@ -433,6 +435,28 @@ class AgendaSettingsModelTests(TestCase):
         self.assertTrue(settings.official_holidays_non_working)
 
 
+class BusinessSettingsModelTests(TestCase):
+    def test_get_solo_can_return_empty_without_creating_record(self):
+        self.assertIsNone(BusinessSettings.get_solo())
+        self.assertEqual(BusinessSettings.objects.count(), 0)
+
+    def test_get_solo_can_create_and_reuse_fixed_singleton(self):
+        first_settings = BusinessSettings.get_solo(create=True)
+        second_settings = BusinessSettings.get_solo(create=True)
+
+        self.assertEqual(first_settings.pk, 1)
+        self.assertEqual(second_settings.pk, 1)
+        self.assertEqual(BusinessSettings.objects.count(), 1)
+
+    def test_second_singleton_record_is_rejected(self):
+        BusinessSettings.get_solo(create=True)
+
+        with self.assertRaises(ValidationError):
+            BusinessSettings.objects.create(business_name="Otra empresa")
+
+        self.assertEqual(BusinessSettings.objects.count(), 1)
+
+
 class ManualClosureModelTests(TestCase):
     def test_manual_closure_rejects_an_inverted_date_range(self):
         with self.assertRaises(ValidationError) as raised:
@@ -729,6 +753,39 @@ class AgendaSettingsFormTests(TestCase):
         self.assertFalse(saved_settings.official_holidays_non_working)
 
 
+class BusinessSettingsFormTests(TestCase):
+    def test_form_requires_all_business_fields(self):
+        form = BusinessSettingsForm(data={})
+
+        self.assertFalse(form.is_valid())
+        self.assertEqual(
+            set(form.errors.keys()),
+            {"business_name", "phone", "email", "address", "city", "tax_id"},
+        )
+
+    def test_form_normalizes_basic_business_data(self):
+        form = BusinessSettingsForm(
+            data={
+                "business_name": "  Centro   Atlas  ",
+                "phone": " 600 123 123 ",
+                "email": " INFO@ATLAS.COM ",
+                "address": " Calle   Mayor  12 ",
+                "city": " Madrid  Centro ",
+                "tax_id": " b12345678 ",
+            }
+        )
+
+        self.assertTrue(form.is_valid())
+        business_settings = form.save()
+
+        self.assertEqual(business_settings.business_name, "Centro Atlas")
+        self.assertEqual(business_settings.phone, "600 123 123")
+        self.assertEqual(business_settings.email, "info@atlas.com")
+        self.assertEqual(business_settings.address, "Calle Mayor 12")
+        self.assertEqual(business_settings.city, "Madrid Centro")
+        self.assertEqual(business_settings.tax_id, "B12345678")
+
+
 class ManualClosureFormTests(TestCase):
     def test_form_surfaces_overlapping_model_validation(self):
         ManualClosure.objects.create(
@@ -942,6 +999,13 @@ class AppAuthenticationBoundaryTests(AgendaBaseTestCase):
 
         self._assert_redirects_to_login(response, requested_url)
 
+    def test_business_settings_redirects_anonymous_user_to_app_login(self):
+        requested_url = reverse("core:business_settings")
+
+        response = self.client.get(requested_url)
+
+        self._assert_redirects_to_login(response, requested_url)
+
     def test_service_settings_redirects_anonymous_user_to_app_login(self):
         requested_url = reverse("core:service_settings")
 
@@ -1050,6 +1114,22 @@ class SessionAccessAndLoginBrandingTests(AgendaBaseTestCase):
         self.assertNotContains(response, "Crear cuenta")
         self.assertNotContains(response, "Registrarse")
 
+    def test_login_page_does_not_render_business_name_from_internal_settings(self):
+        BusinessSettings.objects.create(
+            business_name="Clinica Atlas",
+            phone="600 123 123",
+            email="info@atlas.test",
+            address="Calle Mayor 12",
+            city="Madrid",
+            tax_id="B12345678",
+        )
+
+        response = self.client.get(reverse("core:login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Clinica Atlas")
+        self.assertContains(response, "Agenda de Citas")
+
     def test_authenticated_user_visiting_login_redirects_to_app_entrypoint(self):
         self.login_app_user()
 
@@ -1113,9 +1193,29 @@ class SessionAccessAndLoginBrandingTests(AgendaBaseTestCase):
         self.assertContains(response, ">Agenda<")
         self.assertContains(response, ">Clientes<")
         self.assertContains(response, ">Ajustes<")
+        self.assertContains(response, "Tu negocio")
+        self.assertContains(response, "Agenda de Citas")
         self.assertNotContains(response, "/app/ui/")
         self.assertNotContains(response, "/app/calendar-ui/")
         self.assertNotContains(response, ">CMS<")
+
+    def test_authenticated_app_shell_renders_business_name_when_configured(self):
+        self.login_app_user()
+        BusinessSettings.objects.create(
+            business_name="Clinica Atlas",
+            phone="600 123 123",
+            email="info@atlas.test",
+            address="Calle Mayor 12",
+            city="Madrid",
+            tax_id="B12345678",
+        )
+
+        response = self.client.get(reverse("core:app_entrypoint"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Clinica Atlas")
+        self.assertContains(response, "Agenda de Citas")
+        self.assertNotContains(response, "Tu negocio")
 
     def test_app_logout_redirects_to_login_and_closes_session(self):
         self.login_app_user()
@@ -3895,14 +3995,19 @@ class SettingsIndexViewTests(AuthenticatedAgendaBaseTestCase):
     def test_settings_index_groups_agenda_availability_and_services(self):
         response = self.client.get(reverse("core:settings_index"))
 
+        business_settings_url = reverse("core:business_settings")
         agenda_settings_url = reverse("core:agenda_settings")
         service_settings_url = reverse("core:service_settings")
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "core/settings_index.html")
         self.assertContains(response, "Ajustes")
-        self.assertContains(response, "Configura el funcionamiento de tu agenda y los servicios que ofreces.")
-        self.assertContains(response, 'class="section-surface settings-index__group"', count=2)
+        self.assertContains(response, "Configura tu negocio, la agenda y los servicios desde un solo sitio.")
+        self.assertContains(response, 'class="section-surface settings-index__group"', count=3)
+        self.assertContains(response, "Datos del negocio")
+        self.assertContains(response, "Configura la identidad basica del negocio que usa esta agenda.")
+        self.assertContains(response, "Nombre, contacto y datos fiscales de la instancia actual.")
+        self.assertContains(response, f'href="{business_settings_url}"')
         self.assertContains(response, "Agenda y disponibilidad")
         self.assertContains(response, "Gestiona horarios, cierres y dias no operativos.")
         self.assertContains(response, "Ajustes de agenda")
@@ -3917,6 +4022,121 @@ class SettingsIndexViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertNotContains(response, 'class="settings-breadcrumbs"')
         self.assertNotContains(response, "/app/ui/")
         self.assertNotContains(response, "/app/calendar-ui/")
+
+    def test_settings_index_renders_vertical_stack_in_expected_order(self):
+        response = self.client.get(reverse("core:settings_index"))
+        content = response.content.decode()
+
+        business_index = content.index("<h2>Datos del negocio</h2>")
+        agenda_index = content.index("<h2>Agenda y disponibilidad</h2>")
+        services_index = content.index("<h2>Servicios</h2>")
+
+        self.assertContains(response, 'class="settings-index__stack"')
+        self.assertLess(business_index, agenda_index)
+        self.assertLess(agenda_index, services_index)
+
+
+class BusinessSettingsViewTests(AuthenticatedAgendaBaseTestCase):
+    def test_business_settings_page_renders_single_business_surface(self):
+        response = self.client.get(reverse("core:business_settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/business_settings.html")
+        self.assertEqual(
+            response.context["settings_breadcrumbs"],
+            [
+                {"label": "Ajustes", "url": reverse("core:settings_index")},
+                {"label": "Datos del negocio", "url": ""},
+            ],
+        )
+        self.assertContains(response, 'class="settings-breadcrumbs"')
+        self.assertContains(response, "Guarda aquí los datos principales de tu negocio.")
+        self.assertContains(response, "Datos principales")
+        self.assertContains(response, "Nombre, contacto y dirección en una sola ficha.")
+        self.assertContains(response, 'name="business_name"')
+        self.assertContains(response, 'name="phone"')
+        self.assertContains(response, 'name="email"')
+        self.assertContains(response, 'name="address"')
+        self.assertContains(response, 'name="city"')
+        self.assertContains(response, 'name="tax_id"')
+        self.assertContains(response, "Guardar cambios")
+
+    def test_business_settings_page_renders_fields_in_expected_visual_order(self):
+        response = self.client.get(reverse("core:business_settings"))
+        content = response.content.decode()
+
+        business_name_index = content.index('name="business_name"')
+        phone_index = content.index('name="phone"')
+        email_index = content.index('name="email"')
+        tax_id_index = content.index('name="tax_id"')
+        address_index = content.index('name="address"')
+        city_index = content.index('name="city"')
+
+        self.assertLess(business_name_index, phone_index)
+        self.assertLess(phone_index, email_index)
+        self.assertLess(email_index, tax_id_index)
+        self.assertLess(tax_id_index, address_index)
+        self.assertLess(address_index, city_index)
+
+    def test_business_settings_page_creates_initial_singleton_when_missing(self):
+        self.assertEqual(BusinessSettings.objects.count(), 0)
+
+        response = self.client.post(
+            reverse("core:business_settings"),
+            {
+                "business_name": "Clinica Atlas",
+                "phone": "600 123 123",
+                "email": "info@atlas.test",
+                "address": "Calle Mayor 12",
+                "city": "Madrid",
+                "tax_id": "B12345678",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Datos del negocio guardados.")
+        self.assertEqual(BusinessSettings.objects.count(), 1)
+
+        business_settings = BusinessSettings.objects.get()
+        self.assertEqual(business_settings.pk, 1)
+        self.assertEqual(business_settings.business_name, "Clinica Atlas")
+        self.assertEqual(business_settings.tax_id, "B12345678")
+
+    def test_business_settings_page_edits_existing_singleton_without_creating_extra_records(self):
+        business_settings = BusinessSettings.objects.create(
+            business_name="Clinica Atlas",
+            phone="600 123 123",
+            email="info@atlas.test",
+            address="Calle Mayor 12",
+            city="Madrid",
+            tax_id="B12345678",
+        )
+
+        response = self.client.post(
+            reverse("core:business_settings"),
+            {
+                "business_name": "Centro Atlas Salud",
+                "phone": "911 222 333",
+                "email": "hola@atlas.test",
+                "address": "Avenida Norte 8",
+                "city": "Alcobendas",
+                "tax_id": "B87654321",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Datos del negocio guardados.")
+        self.assertEqual(BusinessSettings.objects.count(), 1)
+
+        business_settings.refresh_from_db()
+        self.assertEqual(business_settings.business_name, "Centro Atlas Salud")
+        self.assertEqual(business_settings.phone, "911 222 333")
+        self.assertEqual(business_settings.email, "hola@atlas.test")
+        self.assertEqual(business_settings.address, "Avenida Norte 8")
+        self.assertEqual(business_settings.city, "Alcobendas")
+        self.assertEqual(business_settings.tax_id, "B87654321")
 
 
 class AgendaSettingsViewTests(AuthenticatedAgendaBaseTestCase):

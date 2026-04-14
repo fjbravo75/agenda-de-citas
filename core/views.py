@@ -22,6 +22,7 @@ from .day_availability import DayAvailabilityResolver
 from .forms import (
     AgendaSettingsForm,
     AppointmentForm,
+    BusinessSettingsForm,
     ClientForm,
     ManualClosureForm,
     OfficialHolidaySyncForm,
@@ -33,6 +34,7 @@ from .models import (
     AgendaSettings,
     Appointment,
     AvailabilityBlock,
+    BusinessSettings,
     Client,
     ManualClosure,
     OfficialHoliday,
@@ -307,6 +309,10 @@ def _settings_index_url():
 
 def _service_settings_url():
     return reverse("core:service_settings")
+
+
+def _business_settings_url():
+    return reverse("core:business_settings")
 
 
 def _archived_client_list_url():
@@ -828,6 +834,27 @@ def app_logout_view(request):
 class AppLoginRequiredMixin(LoginRequiredMixin):
     login_url = reverse_lazy("core:login")
 
+    def get_business_settings(self):
+        return BusinessSettings.get_solo()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        business_settings = self.get_business_settings()
+        business_name = "Tu negocio"
+        is_business_configured = False
+
+        if business_settings and business_settings.is_configured:
+            business_name = business_settings.display_name
+            is_business_configured = True
+
+        context.update(
+            {
+                "app_business_name": business_name,
+                "app_business_is_configured": is_business_configured,
+            }
+        )
+        return context
+
 
 class AppEntryPointView(AppLoginRequiredMixin, TemplateView):
     template_name = "core/app_entrypoint.html"
@@ -878,6 +905,17 @@ class SettingsIndexView(AppLoginRequiredMixin, TemplateView):
             {
                 "settings_groups": [
                     {
+                        "title": "Datos del negocio",
+                        "description": "Configura la identidad basica del negocio que usa esta agenda.",
+                        "items": [
+                            {
+                                "label": "Datos del negocio",
+                                "description": "Nombre, contacto y datos fiscales de la instancia actual.",
+                                "url": _business_settings_url(),
+                            },
+                        ],
+                    },
+                    {
                         "title": "Agenda y disponibilidad",
                         "description": "Gestiona horarios, cierres y dias no operativos.",
                         "items": [
@@ -913,6 +951,39 @@ class SettingsIndexView(AppLoginRequiredMixin, TemplateView):
             }
         )
         return context
+
+
+class BusinessSettingsView(AppLoginRequiredMixin, FormView):
+    template_name = "core/business_settings.html"
+    form_class = BusinessSettingsForm
+
+    def get_settings(self):
+        return BusinessSettings.get_solo() or BusinessSettings(pk=1)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["instance"] = self.get_settings()
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(
+            {
+                "page_title": "Datos del negocio",
+                "page_description": (
+                    "Configura una unica ficha basica del negocio para esta instancia de la app."
+                ),
+                "settings_breadcrumbs": _settings_breadcrumbs(
+                    {"label": "Datos del negocio", "url": ""},
+                ),
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        form.save()
+        messages.success(self.request, "Datos del negocio guardados.")
+        return HttpResponseRedirect(_business_settings_url())
 
 
 class AgendaSettingsView(AppLoginRequiredMixin, FormView):

@@ -10,6 +10,7 @@ from .models import (
     AGENDA_SLOT_TIME_CHOICES,
     AgendaSettings,
     Appointment,
+    BusinessSettings,
     Client,
     ManualClosure,
     Service,
@@ -63,6 +64,43 @@ class AgendaSettingsForm(forms.ModelForm):
                 "pero no cerraran operativamente la agenda."
             ),
         }
+
+
+class BusinessSettingsForm(forms.ModelForm):
+    class Meta:
+        model = BusinessSettings
+        fields = ("business_name", "phone", "email", "address", "city", "tax_id")
+        labels = {
+            "business_name": "Nombre del negocio",
+            "phone": "Telefono",
+            "email": "Email",
+            "address": "Direccion",
+            "city": "Ciudad o localidad",
+            "tax_id": "NIF/CIF",
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field_name in self.fields:
+            self.fields[field_name].required = True
+
+    def clean_business_name(self):
+        return " ".join(self.cleaned_data["business_name"].split())
+
+    def clean_phone(self):
+        return self.cleaned_data["phone"].strip()
+
+    def clean_email(self):
+        return self.cleaned_data["email"].strip().lower()
+
+    def clean_address(self):
+        return " ".join(self.cleaned_data["address"].split())
+
+    def clean_city(self):
+        return " ".join(self.cleaned_data["city"].split())
+
+    def clean_tax_id(self):
+        return self.cleaned_data["tax_id"].strip().upper()
 
 
 class ManualClosureForm(forms.ModelForm):

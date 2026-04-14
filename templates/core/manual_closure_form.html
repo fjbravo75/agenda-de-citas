@@ -5,6 +5,7 @@
 {% block body_class %}theme-root theme-app app-settings-screen{% endblock %}
 
 {% block content %}
+<div class="settings-shell">
 <section class="section-stack">
     <header class="page-header">
         <div class="page-header__copy">
@@ -19,7 +20,7 @@
 
 <section class="section-stack">
     <article class="section-surface">
-        <form method="post" class="section-stack">
+        <form method="post" class="section-stack manual-closure-form">
             {% csrf_token %}
 
             {% if form.non_field_errors %}
@@ -30,7 +31,7 @@
             </div>
             {% endif %}
 
-            <div class="form-grid">
+            <div class="form-grid manual-closure-form__grid">
                 {% for field in form %}
                 <div class="field{% if field.name == 'notes' %} field--full{% endif %}">
                     {{ field.label_tag }}
@@ -59,4 +60,5 @@
         </form>
     </article>
 </section>
+</div>
 {% endblock %}

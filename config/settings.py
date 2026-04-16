@@ -10,7 +10,10 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -19,13 +22,46 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-zj&s80by_6siqlf1oahp9dhg9_$q151*+05#nk^=-c3@5@!-n1'
+def env(name, default=None):
+    return os.environ.get(name, default)
+
+
+def env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name, default=0):
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return int(value)
+
+
+def env_list(name, default=None):
+    value = os.environ.get(name)
+    if value is None:
+        return list(default or [])
+    return [item.strip() for item in value.split(",") if item.strip()]
+
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env_bool("DEBUG", True)
 
-ALLOWED_HOSTS = []
+# SECURITY WARNING: keep the secret key used in production secret!
+if DEBUG:
+    SECRET_KEY = env("SECRET_KEY", "django-insecure-local-dev-only-change-me")
+else:
+    SECRET_KEY = env("SECRET_KEY")
+    if not SECRET_KEY:
+        raise ImproperlyConfigured(
+            "SECRET_KEY must be set when DEBUG is False."
+        )
+
+ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", ["localhost", "127.0.0.1"])
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", [])
 
 
 # Application definition
@@ -89,12 +125,51 @@ WSGI_APPLICATION = "config.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
+postgres_settings = {
+    "POSTGRES_DB": env("POSTGRES_DB"),
+    "POSTGRES_USER": env("POSTGRES_USER"),
+    "POSTGRES_PASSWORD": env("POSTGRES_PASSWORD"),
 }
+use_postgres = any(
+    os.environ.get(name)
+    for name in ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_PORT")
+)
+
+if use_postgres:
+    missing_postgres_settings = [
+        setting_name for setting_name, setting_value in postgres_settings.items() if not setting_value
+    ]
+    if missing_postgres_settings:
+        missing_settings = ", ".join(missing_postgres_settings)
+        raise ImproperlyConfigured(
+            "PostgreSQL environment is incomplete. Missing: "
+            f"{missing_settings}."
+        )
+
+    database_options = {}
+    postgres_sslmode = env("POSTGRES_SSLMODE", "")
+    if postgres_sslmode:
+        database_options["sslmode"] = postgres_sslmode
+
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": postgres_settings["POSTGRES_DB"],
+            "USER": postgres_settings["POSTGRES_USER"],
+            "PASSWORD": postgres_settings["POSTGRES_PASSWORD"],
+            "HOST": env("POSTGRES_HOST", "127.0.0.1"),
+            "PORT": env("POSTGRES_PORT", "5432"),
+            "CONN_MAX_AGE": env_int("POSTGRES_CONN_MAX_AGE", 60),
+            "OPTIONS": database_options,
+        }
+    }
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 
 # Password validation
@@ -121,7 +196,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = env("TIME_ZONE", "Europe/Madrid")
 
 USE_I18N = True
 
@@ -157,6 +232,18 @@ WAGTAILSEARCH_BACKENDS = {
     }
 }
 
-WAGTAILADMIN_BASE_URL = "http://localhost:8000"
+WAGTAILADMIN_BASE_URL = env("WAGTAILADMIN_BASE_URL", "http://localhost:8000")
+
+SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", False)
+SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", False)
+CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", False)
+SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", 0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
+SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", False)
+USE_X_FORWARDED_HOST = env_bool("USE_X_FORWARDED_HOST", False)
+USE_X_FORWARDED_PORT = env_bool("USE_X_FORWARDED_PORT", False)
+
+if env_bool("USE_X_FORWARDED_PROTO", False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

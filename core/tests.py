@@ -3,6 +3,7 @@ from io import StringIO
 from unittest.mock import patch
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management import CommandError, call_command
@@ -1109,11 +1110,11 @@ class SessionAccessAndLoginBrandingTests(AgendaBaseTestCase):
         self.assertContains(response, "Usuario")
         self.assertContains(response, "Contrase")
         self.assertContains(response, "Acceso demo")
-        self.assertContains(response, "demo@estudionorte.demo")
-        self.assertContains(response, "DemoAgenda2026!")
+        self.assertContains(response, settings.DEMO_ACCESS_USERNAME)
+        self.assertContains(response, settings.DEMO_ACCESS_PASSWORD)
         self.assertContains(
             response,
-            "Demo interactiva con datos de ejemplo. Los cambios se reinician automáticamente cada día.",
+            f"Demo interactiva con datos de ejemplo. {settings.DEMO_RESET_NOTICE}",
         )
         self.assertNotContains(response, "wagtail-login.css")
         self.assertNotContains(response, "Forgotten password")
@@ -3146,6 +3147,8 @@ class ClientListViewTests(AuthenticatedAgendaBaseTestCase):
         )
         self.assertContains(response, "Clientes")
         self.assertContains(response, "Consulta clientes, accede a su historial y da de alta nuevos clientes.")
+        self.assertContains(response, "Busca un cliente por nombre, teléfono o email")
+        self.assertContains(response, 'name="q"')
         self.assertContains(response, "Proxima cita")
         self.assertContains(response, 'aria-label="Ruta de clientes"')
         self.assertContains(response, self.primary_client.name)
@@ -3281,6 +3284,70 @@ class ClientListViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertEqual(clients[self.secondary_client.pk].next_appointment_label, "Sin proxima cita")
         self.assertContains(response, expected_label)
         self.assertNotContains(response, f"{_format_compact_day(today)} · 09:00")
+
+    def test_client_list_view_filters_by_name_and_preserves_search_context_urls(self):
+        list_url = reverse("core:client_list")
+        response = self.client.get(list_url, {"q": "  claudia  "})
+        clients = list(response.context["clients"])
+        expected_current_url = f"{list_url}?{urlencode({'q': 'claudia'})}"
+        expected_detail_url = (
+            f"{reverse('core:client_detail', args=[self.primary_client.pk])}"
+            f"?{urlencode({'next': expected_current_url})}"
+        )
+        expected_appointment_url = (
+            f"{reverse('core:appointment_create')}?"
+            f"{urlencode({'next': expected_current_url, 'client': self.primary_client.pk})}"
+        )
+        expected_client_create_url = (
+            f"{reverse('core:client_create')}?{urlencode({'next': expected_current_url})}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["search_query"], "claudia")
+        self.assertEqual([client.pk for client in clients], [self.primary_client.pk])
+        self.assertContains(response, self.primary_client.name)
+        self.assertNotContains(response, self.secondary_client.name)
+        self.assertContains(response, 'value="claudia"')
+        self.assertContains(response, expected_detail_url.replace("&", "&amp;"))
+        self.assertContains(response, expected_appointment_url.replace("&", "&amp;"))
+        self.assertContains(response, expected_client_create_url.replace("&", "&amp;"))
+
+    def test_client_list_view_filters_by_phone_and_email(self):
+        list_url = reverse("core:client_list")
+        self.primary_client.phone = "+34 600 111 222"
+        self.primary_client.email = "claudia@example.com"
+        self.primary_client.save(update_fields=["phone", "email"])
+        self.secondary_client.phone = "+34 699 222 333"
+        self.secondary_client.email = "mario@example.com"
+        self.secondary_client.save(update_fields=["phone", "email"])
+
+        phone_response = self.client.get(list_url, {"q": "699 222"})
+        phone_clients = list(phone_response.context["clients"])
+        email_response = self.client.get(list_url, {"q": "claudia@example.com"})
+        email_clients = list(email_response.context["clients"])
+
+        self.assertEqual(phone_response.status_code, 200)
+        self.assertEqual([client.pk for client in phone_clients], [self.secondary_client.pk])
+        self.assertContains(phone_response, self.secondary_client.name)
+        self.assertNotContains(phone_response, self.primary_client.name)
+
+        self.assertEqual(email_response.status_code, 200)
+        self.assertEqual([client.pk for client in email_clients], [self.primary_client.pk])
+        self.assertContains(email_response, self.primary_client.name)
+        self.assertNotContains(email_response, self.secondary_client.name)
+
+    def test_client_list_view_shows_search_empty_state_when_no_results_match(self):
+        response = self.client.get(reverse("core:client_list"), {"q": "inexistente"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sin resultados")
+        self.assertContains(response, "No hay clientes que coincidan con tu busqueda.")
+        self.assertContains(response, "Prueba con otro nombre, telefono o email.")
+        self.assertContains(response, "Ver todos los clientes")
+        self.assertNotContains(
+            response,
+            "Todavia no hay clientes registrados. Puedes crear el primero desde esta pantalla.",
+        )
 
     @patch("core.views.timezone.now")
     def test_client_list_view_shows_simple_fallback_when_only_past_or_cancelled_appointments_exist(
@@ -4276,7 +4343,8 @@ class AgendaSettingsViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertContains(response, "23/04/2026")
         self.assertContains(response, "Sync BOE nacional")
         self.assertNotContains(response, "/app/settings/agenda/official-holidays/")
-        self.assertContains(response, "<th>Acciones</th>", count=1, html=True)
+        self.assertContains(response, "<th>Origen</th>", count=1, html=True)
+        self.assertNotContains(response, "<th>Acciones</th>", html=True)
 
     def test_removed_manual_official_holiday_named_urls_are_not_registered(self):
         with self.assertRaises(NoReverseMatch):
@@ -4890,7 +4958,7 @@ class OfficialHolidaySyncCommandTests(TestCase):
 
 
 class SeedAgendaDemoCommandTests(TestCase):
-    @patch("core.management.commands.seed_agenda_demo.Command._reference_day", return_value=date(2026, 4, 14))
+    @patch("core.demo_reset.AgendaDemoResetService._reference_day", return_value=date(2026, 4, 14))
     def test_command_seeds_complete_shared_demo_dataset(self, _mocked_reference_day):
         stdout = StringIO()
 
@@ -4904,9 +4972,9 @@ class SeedAgendaDemoCommandTests(TestCase):
         self.assertEqual(business_settings.city, "Málaga")
         self.assertEqual(business_settings.tax_id, "B29765431")
 
-        demo_user = get_user_model().objects.get(username="demo@estudionorte.demo")
-        self.assertEqual(demo_user.email, "demo@estudionorte.demo")
-        self.assertTrue(demo_user.check_password("demo-estudio-norte-2026"))
+        demo_user = get_user_model().objects.get(username=settings.DEMO_ACCESS_USERNAME)
+        self.assertEqual(demo_user.email, settings.DEMO_ACCESS_USERNAME)
+        self.assertTrue(demo_user.check_password(settings.DEMO_ACCESS_PASSWORD))
 
         self.assertEqual(Service.objects.count(), 12)
         self.assertQuerySetEqual(
@@ -4961,7 +5029,7 @@ class SeedAgendaDemoCommandTests(TestCase):
         self.assertIn("blocks=3", stdout.getvalue())
         self.assertIn("appointments=48", stdout.getvalue())
 
-    @patch("core.management.commands.seed_agenda_demo.Command._reference_day", return_value=date(2026, 4, 14))
+    @patch("core.demo_reset.AgendaDemoResetService._reference_day", return_value=date(2026, 4, 14))
     def test_command_is_idempotent_and_resets_demo_scope_cleanly(self, _mocked_reference_day):
         BusinessSettings.objects.create(
             business_name="Negocio previo",
@@ -4993,7 +5061,7 @@ class SeedAgendaDemoCommandTests(TestCase):
             label="Cierre residual",
         )
         demo_user = get_user_model().objects.create_user(
-            username="demo@estudionorte.demo",
+            username=settings.DEMO_ACCESS_USERNAME,
             email="old-demo@example.com",
             password="old-password",
             is_active=False,
@@ -5017,10 +5085,10 @@ class SeedAgendaDemoCommandTests(TestCase):
         call_command("seed_agenda_demo")
 
         demo_user.refresh_from_db()
-        self.assertEqual(demo_user.email, "demo@estudionorte.demo")
+        self.assertEqual(demo_user.email, settings.DEMO_ACCESS_USERNAME)
         self.assertTrue(demo_user.is_active)
-        self.assertTrue(demo_user.check_password("demo-estudio-norte-2026"))
-        self.assertEqual(get_user_model().objects.filter(username="demo@estudionorte.demo").count(), 1)
+        self.assertTrue(demo_user.check_password(settings.DEMO_ACCESS_PASSWORD))
+        self.assertEqual(get_user_model().objects.filter(username=settings.DEMO_ACCESS_USERNAME).count(), 1)
         self.assertFalse(Client.objects.filter(name="Cliente residual").exists())
         self.assertFalse(Service.objects.filter(name="Servicio residual").exists())
         self.assertEqual(OfficialHoliday.objects.count(), 0)
@@ -5040,3 +5108,57 @@ class SeedAgendaDemoCommandTests(TestCase):
         }
 
         self.assertEqual(first_signature, second_signature)
+
+    @patch("core.demo_reset.AgendaDemoResetService._reference_day", return_value=date(2026, 4, 17))
+    def test_command_avoids_block_collisions_when_offsets_collapse_into_same_working_day(
+        self,
+        _mocked_reference_day,
+    ):
+        call_command("seed_agenda_demo")
+
+        blocked_slots = set(AvailabilityBlock.objects.values_list("day", "slot_time"))
+        appointment_slots = {(appointment.slot_day, appointment.slot_time) for appointment in Appointment.objects.all()}
+
+        self.assertEqual(blocked_slots & appointment_slots, set())
+
+
+class ResetAgendaDemoCommandTests(TestCase):
+    @patch("core.demo_reset.AgendaDemoResetService._reference_day", return_value=date(2026, 4, 14))
+    def test_reset_command_restores_demo_state_and_keeps_fixed_credentials(self, _mocked_reference_day):
+        stdout = StringIO()
+
+        call_command("reset_agenda_demo")
+        stray_client = Client.objects.create(name="Cliente temporal", is_archived=False)
+        stray_service = Service.objects.create(name="Servicio temporal", description="Temporal", is_active=True)
+        stray_start_at = timezone.make_aware(
+            datetime(2026, 4, 15, 9, 0),
+            timezone.get_current_timezone(),
+        )
+        stray_appointment = Appointment.objects.create(
+            client=stray_client,
+            start_at=stray_start_at,
+            end_at=agenda_end_at_for_slot(stray_start_at),
+            status=Appointment.Status.CONFIRMED,
+        )
+        stray_appointment.services.set([stray_service])
+        demo_user = get_user_model().objects.get(username=settings.DEMO_ACCESS_USERNAME)
+        demo_user.set_password("temp-password")
+        demo_user.is_active = False
+        demo_user.save(update_fields=["password", "is_active"])
+
+        call_command("reset_agenda_demo", stdout=stdout)
+        call_command("reset_agenda_demo")
+
+        demo_user.refresh_from_db()
+        self.assertTrue(demo_user.is_active)
+        self.assertTrue(demo_user.check_password(settings.DEMO_ACCESS_PASSWORD))
+        self.assertEqual(get_user_model().objects.filter(username=settings.DEMO_ACCESS_USERNAME).count(), 1)
+        self.assertFalse(Client.objects.filter(name="Cliente temporal").exists())
+        self.assertFalse(Service.objects.filter(name="Servicio temporal").exists())
+        self.assertEqual(Client.objects.count(), 36)
+        self.assertEqual(Service.objects.count(), 12)
+        self.assertEqual(Appointment.objects.count(), 48)
+        self.assertEqual(AvailabilityBlock.objects.count(), 3)
+        self.assertEqual(ManualClosure.objects.count(), 2)
+        self.assertEqual(OfficialHoliday.objects.count(), 0)
+        self.assertIn("Agenda demo reset", stdout.getvalue())

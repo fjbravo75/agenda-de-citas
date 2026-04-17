@@ -875,6 +875,40 @@ h3 {
     overflow-x: auto;
 }
 
+.client-search {
+    display: grid;
+    gap: 8px;
+}
+
+.client-search__label {
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.45;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--color-text-muted);
+}
+
+.client-search__controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.client-search__controls input {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+}
+
+.client-search__controls .button {
+    flex: 0 0 auto;
+}
+
+.client-search__clear {
+    justify-self: start;
+}
+
 .table {
     width: 100%;
     min-width: 0;

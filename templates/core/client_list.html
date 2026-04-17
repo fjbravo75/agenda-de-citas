@@ -34,6 +34,23 @@
 
 <section class="section-stack">
     <article class="section-surface">
+        <form method="get" class="client-search">
+            <label class="client-search__label" for="client-search-query">Busca un cliente por nombre, teléfono o email</label>
+            <div class="client-search__controls">
+                <input
+                    id="client-search-query"
+                    type="search"
+                    name="q"
+                    value="{{ search_query }}"
+                    placeholder="Nombre, teléfono o email"
+                >
+                <button class="button button--primary" type="submit">Buscar</button>
+            </div>
+            {% if search_query %}
+            <a class="button button--ghost client-search__clear" href="{{ client_list_url }}">Limpiar</a>
+            {% endif %}
+        </form>
+
         {% if clients %}
         <div class="table-wrap">
             <table class="table table--compact">
@@ -61,8 +78,15 @@
         </div>
         {% else %}
         <div class="empty-state">
+            {% if search_query and has_active_clients %}
+            <p class="empty-state__icon">Sin resultados</p>
+            <p class="text-secondary">No hay clientes que coincidan con tu busqueda.</p>
+            <p class="text-secondary">Prueba con otro nombre, telefono o email.</p>
+            <a class="button button--ghost" href="{{ client_list_url }}">Ver todos los clientes</a>
+            {% else %}
             <p class="empty-state__icon">Sin clientes</p>
             <p class="text-secondary">Todavia no hay clientes registrados. Puedes crear el primero desde esta pantalla.</p>
+            {% endif %}
         </div>
         {% endif %}
     </article>

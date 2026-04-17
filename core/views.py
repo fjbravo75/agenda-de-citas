@@ -3,6 +3,7 @@ from datetime import date, datetime, time, timedelta
 from urllib.parse import urlencode, urlsplit
 
 import requests
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login as auth_login, logout as auth_logout
 from django.contrib.auth.forms import AuthenticationForm
@@ -821,6 +822,9 @@ def app_login_view(request):
         {
             "form": form,
             "next_url": next_url,
+            "demo_access_username": settings.DEMO_ACCESS_USERNAME,
+            "demo_access_password": settings.DEMO_ACCESS_PASSWORD,
+            "demo_reset_notice": settings.DEMO_RESET_NOTICE,
         },
     )
 
@@ -1623,9 +1627,15 @@ class ClientDetailView(AppLoginRequiredMixin, TemplateView):
 class ClientListView(AppLoginRequiredMixin, TemplateView):
     template_name = "core/client_list.html"
 
+    def get_search_query(self):
+        return " ".join(self.request.GET.get("q", "").split())
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        current_url = self.request.get_full_path()
+        search_query = self.get_search_query()
+        current_url = reverse("core:client_list")
+        if search_query:
+            current_url = f"{current_url}?{urlencode({'q': search_query})}"
         future_appointments = Prefetch(
             "appointments",
             queryset=Appointment.objects.filter(
@@ -1634,8 +1644,16 @@ class ClientListView(AppLoginRequiredMixin, TemplateView):
             ).order_by("start_at", "id"),
             to_attr="future_active_appointments",
         )
+        active_clients = Client.objects.active()
+        has_active_clients = active_clients.exists()
+        if search_query:
+            active_clients = active_clients.filter(
+                Q(name__icontains=search_query)
+                | Q(phone__icontains=search_query)
+                | Q(email__icontains=search_query)
+            )
         clients = list(
-            Client.objects.active().order_by("name", "id").prefetch_related(future_appointments)
+            active_clients.order_by("name", "id").prefetch_related(future_appointments)
         )
 
         for client in clients:
@@ -1660,9 +1678,12 @@ class ClientListView(AppLoginRequiredMixin, TemplateView):
                 "client_breadcrumbs": _client_breadcrumbs(),
                 "client_create_url": _url_with_next(
                     reverse("core:client_create"),
-                    reverse("core:client_list"),
+                    current_url,
                 ),
                 "archived_client_list_url": _archived_client_list_url(),
+                "client_list_url": reverse("core:client_list"),
+                "has_active_clients": has_active_clients,
+                "search_query": search_query,
             }
         )
         return context

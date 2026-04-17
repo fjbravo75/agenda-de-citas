@@ -63,6 +63,14 @@ else:
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", ["localhost", "127.0.0.1"])
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", [])
 
+# Stable demo access contract shared by the login UI and demo seed.
+DEMO_ACCESS_USERNAME = "demo@estudionorte.demo"
+DEMO_ACCESS_PASSWORD = "DemoAgenda2026!"
+DEMO_RESET_NOTICE = (
+    "En la demo pública, los datos de trabajo se reinician cada día "
+    "sin cambiar el acceso demo."
+)
+
 
 # Application definition
 

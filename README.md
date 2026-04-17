@@ -1,74 +1,77 @@
 # Agenda de Citas
 
-App Django server-rendered para gestión de agenda y citas.
+Agenda de Citas es una app Django server-rendered para negocios que trabajan por cita.
+Está planteada como un producto pequeño, claro y defendible para contextos como peluquería, fisioterapia, psicología o servicios similares.
 
-## Configuración por entorno
+## Enfoque del proyecto
 
-El proyecto usa un único `config/settings.py` parametrizado por variables de entorno.
-No carga archivos `.env` automáticamente: en local o en servidor, las variables deben exportarse desde el shell o desde el gestor de procesos correspondiente.
+La app no busca resolver "todo" con complejidad innecesaria.
+El núcleo del producto es la agenda diaria y mensual, con una operativa sobria:
 
-### Variables soportadas
+- calendario mensual a la izquierda y panel diario a la derecha
+- creación y edición de citas dentro del flujo principal
+- clientes activos y archivados
+- servicios configurables
+- reglas globales de agenda
+- cierres manuales por día o rango
+- festivos oficiales sincronizados desde BOE
+- acceso autenticado con pantalla propia de login
 
-#### Núcleo
+La implementación sigue una dirección deliberadamente conservadora:
 
-- `SECRET_KEY`: clave secreta de Django. En producción debe ser propia y segura.
-- `DEBUG`: `True` o `False`. En producción debe ir en `False`.
-- `ALLOWED_HOSTS`: lista separada por comas. Ejemplo: `agenda.example.com,www.agenda.example.com`.
-- `CSRF_TRUSTED_ORIGINS`: lista separada por comas con URLs completas. Ejemplo: `https://agenda.example.com,https://www.agenda.example.com`.
-- `WAGTAILADMIN_BASE_URL`: URL pública base de admin. Ejemplo: `https://agenda.example.com`.
-- `TIME_ZONE`: zona horaria operativa. Por defecto queda en `Europe/Madrid`.
+- Django como fuente de verdad
+- server-rendered HTML
+- `htmx` solo donde aporta valor claro
+- sin SPA ni frontend separado
 
-#### Base de datos
+## Estado actual
 
-Si no hay variables PostgreSQL definidas, el proyecto usa SQLite local en `db.sqlite3`.
+El repositorio ya contiene una base funcional real del producto:
 
-Para activar PostgreSQL:
+- agenda principal operativa en `/app/`
+- alta y edición de citas
+- ficha y gestión básica de clientes
+- ajustes de negocio, agenda y servicios
+- autenticación orientada a la app
+- test suite y validaciones básicas de Django en verde
 
-- `POSTGRES_DB`
-- `POSTGRES_USER`
-- `POSTGRES_PASSWORD`
-- `POSTGRES_HOST` opcional, por defecto `127.0.0.1`
-- `POSTGRES_PORT` opcional, por defecto `5432`
-- `POSTGRES_SSLMODE` opcional
-- `POSTGRES_CONN_MAX_AGE` opcional, por defecto `60`
+En términos técnicos, el proyecto ya está preparado para avanzar hacia un despliegue tradicional con Django + Gunicorn + PostgreSQL + Nginx, aunque la ejecución real en servidor se documenta aparte.
 
-#### Flags HTTPS opcionales
+## Stack
 
-- `SECURE_SSL_REDIRECT`
-- `SESSION_COOKIE_SECURE`
-- `CSRF_COOKIE_SECURE`
-- `SECURE_HSTS_SECONDS`
-- `SECURE_HSTS_INCLUDE_SUBDOMAINS`
-- `SECURE_HSTS_PRELOAD`
-- `USE_X_FORWARDED_HOST`
-- `USE_X_FORWARDED_PORT`
-- `USE_X_FORWARDED_PROTO`
+- Python
+- Django
+- Wagtail
+- SQLite en local
+- PostgreSQL para producción
+- Gunicorn
+- HTML server-rendered
+- CSS propio
+- `htmx` mínimo
 
-## Arranque local
+## Desarrollo local
 
-Con la configuración local por defecto:
+Arranque local mínimo:
 
 ```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 .venv/bin/python manage.py migrate
 .venv/bin/python manage.py runserver
 ```
 
-## Arranque productivo básico del repo
+Si no se define ningún `POSTGRES_*`, el proyecto usa SQLite local en `db.sqlite3`.
 
-Este repo queda preparado para un despliegue clásico con:
+La referencia base de variables está en `.env.example`.
 
-- variables de entorno
-- PostgreSQL
-- Gunicorn
-- `migrate`
-- `collectstatic`
+## Despliegue
 
-Secuencia base del siguiente bloque de despliegue:
+La guía técnica de despliegue vive en [docs/deployment.md](docs/deployment.md).
 
-```bash
-.venv/bin/python manage.py migrate
-.venv/bin/python manage.py collectstatic --noinput
-.venv/bin/gunicorn config.wsgi:application --bind 0.0.0.0:8000
-```
+Ahí queda documentado el bloque operativo:
 
-La configuración de Nginx, `systemd`, TLS y servidor queda fuera de este microbloque.
+- variables de entorno de producción
+- orden exacto de bootstrap
+- notas sobre PostgreSQL, Gunicorn y Wagtail
+- pasos manuales que quedan fuera del repo
+- advertencias actuales sobre demo pública

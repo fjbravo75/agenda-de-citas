@@ -29,6 +29,11 @@ from .forms import (
     OfficialHolidaySyncForm,
     ServiceForm,
 )
+from .boe_sync_state import (
+    clear_boe_sync_failure_trace,
+    store_boe_sync_failure_trace,
+    store_boe_sync_trace,
+)
 from .management.commands.sync_official_holidays import BoeSyncError, import_boe_national_holidays
 from .models import (
     AGENDA_SLOT_TIMES,
@@ -1087,55 +1092,6 @@ class AgendaSettingsView(AppLoginRequiredMixin, FormView):
         )
         return context
 
-    def _store_sync_trace(self, result):
-        agenda_settings = self.get_settings()
-        agenda_settings.last_boe_sync_at = timezone.now()
-        agenda_settings.last_boe_sync_year = result.target_year
-        agenda_settings.last_boe_sync_resolution_identifier = result.resolution.identifier
-        agenda_settings.last_boe_sync_resolution_title = result.resolution.title
-        agenda_settings.last_boe_sync_resolution_url = result.resolution.url_html
-        agenda_settings.last_boe_sync_created_count = result.created_count
-        agenda_settings.last_boe_sync_skipped_existing_count = result.skipped_existing_count
-        agenda_settings.last_boe_sync_error_count = result.error_count
-        agenda_settings.save(
-            update_fields=[
-                "last_boe_sync_at",
-                "last_boe_sync_year",
-                "last_boe_sync_resolution_identifier",
-                "last_boe_sync_resolution_title",
-                "last_boe_sync_resolution_url",
-                "last_boe_sync_created_count",
-                "last_boe_sync_skipped_existing_count",
-                "last_boe_sync_error_count",
-            ]
-        )
-
-    def _store_sync_failure_trace(self, target_year, error_message):
-        agenda_settings = self.get_settings()
-        agenda_settings.last_boe_sync_failure_at = timezone.now()
-        agenda_settings.last_boe_sync_failure_year = target_year
-        agenda_settings.last_boe_sync_failure_message = error_message or "Error desconocido durante el sync BOE."
-        agenda_settings.save(
-            update_fields=[
-                "last_boe_sync_failure_at",
-                "last_boe_sync_failure_year",
-                "last_boe_sync_failure_message",
-            ]
-        )
-
-    def _clear_sync_failure_trace(self):
-        agenda_settings = self.get_settings()
-        agenda_settings.last_boe_sync_failure_at = None
-        agenda_settings.last_boe_sync_failure_year = None
-        agenda_settings.last_boe_sync_failure_message = ""
-        agenda_settings.save(
-            update_fields=[
-                "last_boe_sync_failure_at",
-                "last_boe_sync_failure_year",
-                "last_boe_sync_failure_message",
-            ]
-        )
-
     def _handle_settings_post(self):
         form = self.get_settings_form(data=self.request.POST)
         if form.is_valid():
@@ -1165,10 +1121,10 @@ class AgendaSettingsView(AppLoginRequiredMixin, FormView):
             result = import_boe_national_holidays(target_year)
         except (requests.RequestException, BoeSyncError) as error:
             error_message = str(error)
-            self._store_sync_failure_trace(target_year, error_message)
+            store_boe_sync_failure_trace(target_year, error_message, agenda_settings=self.get_settings())
             messages.error(self.request, f"No se pudo completar la importacion BOE {target_year}: {error_message}")
         else:
-            self._store_sync_trace(result)
+            store_boe_sync_trace(result, agenda_settings=self.get_settings())
             messages.success(
                 self.request,
                 (
@@ -1183,7 +1139,7 @@ class AgendaSettingsView(AppLoginRequiredMixin, FormView):
 
     def _handle_clear_sync_failure_post(self):
         if self.get_settings().has_boe_sync_failure_trace:
-            self._clear_sync_failure_trace()
+            clear_boe_sync_failure_trace(agenda_settings=self.get_settings())
             messages.success(self.request, "Traza del ultimo fallo BOE limpiada.")
         return HttpResponseRedirect(_agenda_settings_url())
 

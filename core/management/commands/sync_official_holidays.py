@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 from django.core.management.base import BaseCommand, CommandError
 from django.db import IntegrityError, transaction
 
+from core.boe_sync_state import store_boe_sync_failure_trace, store_boe_sync_trace
 from core.models import OfficialHoliday
 
 
@@ -290,8 +291,10 @@ class Command(BaseCommand):
                 error_reporter=lambda message: self.stderr.write(self.style.ERROR(message)),
             )
         except (requests.RequestException, BoeSyncError) as error:
+            store_boe_sync_failure_trace(target_year, str(error))
             raise CommandError(str(error)) from error
 
+        store_boe_sync_trace(result)
         self.stdout.write(f"BOE {result.resolution.identifier}: {result.resolution.title}")
         self.stdout.write(
             self.style.SUCCESS(

@@ -18,7 +18,6 @@ from core.models import (
     BusinessSettings,
     Client,
     ManualClosure,
-    OfficialHoliday,
     Service,
     agenda_end_at_for_slot,
 )
@@ -167,7 +166,6 @@ class AgendaDemoResetService:
         AvailabilityBlock.objects.all().delete()
         Appointment.objects.all().delete()
         ManualClosure.objects.all().delete()
-        OfficialHoliday.objects.all().delete()
         Service.objects.all().delete()
         Client.objects.all().delete()
 
@@ -177,18 +175,6 @@ class AgendaDemoResetService:
             defaults={
                 "saturdays_non_working": True,
                 "sundays_non_working": True,
-                "official_holidays_non_working": True,
-                "last_boe_sync_at": None,
-                "last_boe_sync_year": None,
-                "last_boe_sync_resolution_identifier": "",
-                "last_boe_sync_resolution_title": "",
-                "last_boe_sync_resolution_url": "",
-                "last_boe_sync_created_count": None,
-                "last_boe_sync_skipped_existing_count": None,
-                "last_boe_sync_error_count": None,
-                "last_boe_sync_failure_at": None,
-                "last_boe_sync_failure_year": None,
-                "last_boe_sync_failure_message": "",
             },
         )
 

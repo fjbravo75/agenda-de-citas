@@ -4371,7 +4371,7 @@ class AgendaSettingsViewTests(AuthenticatedAgendaBaseTestCase):
             self.assertEqual(response.status_code, 404)
 
     @patch("core.views.import_boe_national_holidays")
-    @patch("core.views.timezone.now")
+    @patch("core.boe_sync_state.timezone.now")
     def test_settings_page_can_launch_manual_boe_sync_and_persist_visible_trace(self, mocked_now, mocked_import):
         mocked_now.return_value = timezone.make_aware(datetime(2026, 4, 9, 10, 45))
         mocked_import.return_value = OfficialHolidaySyncResult(
@@ -4432,7 +4432,7 @@ class AgendaSettingsViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertContains(response, "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-21667")
 
     @patch("core.views.import_boe_national_holidays")
-    @patch("core.views.timezone.now")
+    @patch("core.boe_sync_state.timezone.now")
     def test_settings_page_persists_and_shows_last_boe_sync_failure(self, mocked_now, mocked_import):
         mocked_now.return_value = timezone.make_aware(datetime(2026, 4, 9, 12, 5))
         mocked_import.side_effect = BoeSyncError("No se ha encontrado la resolución en el BOE.")
@@ -4465,7 +4465,7 @@ class AgendaSettingsViewTests(AuthenticatedAgendaBaseTestCase):
         self.assertContains(response, "Limpiar ultimo fallo")
 
     @patch("core.views.import_boe_national_holidays")
-    @patch("core.views.timezone.now")
+    @patch("core.boe_sync_state.timezone.now")
     def test_settings_page_keeps_last_successful_trace_when_new_sync_fails(self, mocked_now, mocked_import):
         mocked_now.return_value = timezone.make_aware(datetime(2026, 4, 10, 9, 15))
         settings = AgendaSettings.get_solo()
@@ -4822,7 +4822,9 @@ class OfficialHolidaySyncCommandTests(TestCase):
             url_html=f"https://www.boe.es/diario_boe/txt.php?id=BOE-A-{year - 1}-21667",
         )
 
-    def test_command_imports_new_holidays_with_boe_source(self):
+    @patch("core.boe_sync_state.timezone.now")
+    def test_command_imports_new_holidays_with_boe_source_and_persists_visible_trace(self, mocked_now):
+        mocked_now.return_value = timezone.make_aware(datetime(2026, 4, 11, 9, 30))
         stdout = StringIO()
 
         with patch(
@@ -4845,6 +4847,18 @@ class OfficialHolidaySyncCommandTests(TestCase):
                 source=OfficialHoliday.Source.BOE_NATIONAL_SYNC,
             ).exists()
         )
+        settings = AgendaSettings.get_solo()
+        self.assertEqual(settings.last_boe_sync_at, mocked_now.return_value)
+        self.assertEqual(settings.last_boe_sync_year, 2026)
+        self.assertEqual(settings.last_boe_sync_resolution_identifier, "BOE-A-2025-21667")
+        self.assertIn("relación de fiestas laborales para el año 2026", settings.last_boe_sync_resolution_title)
+        self.assertEqual(
+            settings.last_boe_sync_resolution_url,
+            "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-21667",
+        )
+        self.assertEqual(settings.last_boe_sync_created_count, 2)
+        self.assertEqual(settings.last_boe_sync_skipped_existing_count, 0)
+        self.assertEqual(settings.last_boe_sync_error_count, 0)
         self.assertIn("creados=2", stdout.getvalue())
         self.assertIn("ignorados_existentes=0", stdout.getvalue())
         self.assertIn("reconciliados=0", stdout.getvalue())
@@ -4946,7 +4960,9 @@ class OfficialHolidaySyncCommandTests(TestCase):
         self.assertIn("reconciliados=2", stdout.getvalue())
         self.assertIn("errores=0", stdout.getvalue())
 
-    def test_command_raises_clear_error_when_boe_lookup_fails(self):
+    @patch("core.boe_sync_state.timezone.now")
+    def test_command_raises_clear_error_when_boe_lookup_fails_and_persists_failure_trace(self, mocked_now):
+        mocked_now.return_value = timezone.make_aware(datetime(2026, 4, 11, 10, 5))
         with patch(
             "core.management.commands.sync_official_holidays.BoeNationalHolidaySyncService.fetch_national_holidays",
             side_effect=BoeSyncError("No se ha encontrado la resolución en el BOE."),
@@ -4954,6 +4970,10 @@ class OfficialHolidaySyncCommandTests(TestCase):
             with self.assertRaises(CommandError) as raised:
                 call_command("sync_official_holidays", "--year", "2026")
 
+        settings = AgendaSettings.get_solo()
+        self.assertEqual(settings.last_boe_sync_failure_at, mocked_now.return_value)
+        self.assertEqual(settings.last_boe_sync_failure_year, 2026)
+        self.assertEqual(settings.last_boe_sync_failure_message, "No se ha encontrado la resolución en el BOE.")
         self.assertIn("No se ha encontrado la resolución", str(raised.exception))
 
 
@@ -5039,7 +5059,25 @@ class SeedAgendaDemoCommandTests(TestCase):
             city="Sevilla",
             tax_id="B00000000",
         )
-        OfficialHoliday.objects.create(day=date(2026, 4, 23), name="Festivo residual")
+        settings_state = AgendaSettings.get_solo()
+        settings_state.official_holidays_non_working = False
+        settings_state.last_boe_sync_at = timezone.make_aware(datetime(2026, 4, 8, 18, 30))
+        settings_state.last_boe_sync_year = 2026
+        settings_state.last_boe_sync_resolution_identifier = "BOE-A-2025-21667"
+        settings_state.last_boe_sync_resolution_title = "Resolucion persistente"
+        settings_state.last_boe_sync_resolution_url = "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-21667"
+        settings_state.last_boe_sync_created_count = 8
+        settings_state.last_boe_sync_skipped_existing_count = 1
+        settings_state.last_boe_sync_error_count = 0
+        settings_state.last_boe_sync_failure_at = timezone.make_aware(datetime(2026, 4, 9, 8, 15))
+        settings_state.last_boe_sync_failure_year = 2026
+        settings_state.last_boe_sync_failure_message = "Fallo previo"
+        settings_state.save()
+        OfficialHoliday.objects.create(
+            day=date(2026, 4, 23),
+            name="Festivo residual",
+            source=OfficialHoliday.Source.BOE_NATIONAL_SYNC,
+        )
         stray_client = Client.objects.create(name="Cliente residual", is_archived=False)
         stray_service = Service.objects.create(name="Servicio residual", description="Temporal", is_active=True)
         stray_start_at = timezone.make_aware(
@@ -5085,13 +5123,18 @@ class SeedAgendaDemoCommandTests(TestCase):
         call_command("seed_agenda_demo")
 
         demo_user.refresh_from_db()
+        settings_state.refresh_from_db()
         self.assertEqual(demo_user.email, settings.DEMO_ACCESS_USERNAME)
         self.assertTrue(demo_user.is_active)
         self.assertTrue(demo_user.check_password(settings.DEMO_ACCESS_PASSWORD))
         self.assertEqual(get_user_model().objects.filter(username=settings.DEMO_ACCESS_USERNAME).count(), 1)
         self.assertFalse(Client.objects.filter(name="Cliente residual").exists())
         self.assertFalse(Service.objects.filter(name="Servicio residual").exists())
-        self.assertEqual(OfficialHoliday.objects.count(), 0)
+        self.assertEqual(OfficialHoliday.objects.count(), 1)
+        self.assertFalse(settings_state.official_holidays_non_working)
+        self.assertEqual(settings_state.last_boe_sync_year, 2026)
+        self.assertEqual(settings_state.last_boe_sync_resolution_identifier, "BOE-A-2025-21667")
+        self.assertEqual(settings_state.last_boe_sync_failure_message, "Fallo previo")
 
         second_signature = {
             "business_name": BusinessSettings.objects.get(pk=1).business_name,
@@ -5162,3 +5205,65 @@ class ResetAgendaDemoCommandTests(TestCase):
         self.assertEqual(ManualClosure.objects.count(), 2)
         self.assertEqual(OfficialHoliday.objects.count(), 0)
         self.assertIn("Agenda demo reset", stdout.getvalue())
+
+    @patch("core.demo_reset.AgendaDemoResetService._reference_day", return_value=date(2026, 4, 23))
+    def test_reset_command_preserves_boe_reference_state_and_calendar_holiday_behavior(
+        self,
+        _mocked_reference_day,
+    ):
+        settings_state = AgendaSettings.get_solo()
+        settings_state.official_holidays_non_working = True
+        settings_state.last_boe_sync_at = timezone.make_aware(datetime(2026, 4, 9, 10, 45))
+        settings_state.last_boe_sync_year = 2026
+        settings_state.last_boe_sync_resolution_identifier = "BOE-A-2025-21667"
+        settings_state.last_boe_sync_resolution_title = "Resolucion correcta"
+        settings_state.last_boe_sync_resolution_url = "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-21667"
+        settings_state.last_boe_sync_created_count = 8
+        settings_state.last_boe_sync_skipped_existing_count = 1
+        settings_state.last_boe_sync_error_count = 0
+        settings_state.last_boe_sync_failure_at = timezone.make_aware(datetime(2026, 4, 10, 9, 15))
+        settings_state.last_boe_sync_failure_year = 2026
+        settings_state.last_boe_sync_failure_message = "Fallo temporal"
+        settings_state.save()
+        OfficialHoliday.objects.create(
+            day=date(2026, 4, 23),
+            name="San Jorge",
+            source=OfficialHoliday.Source.BOE_NATIONAL_SYNC,
+        )
+
+        call_command("reset_agenda_demo")
+
+        settings_state.refresh_from_db()
+        self.assertTrue(
+            OfficialHoliday.objects.filter(
+                day=date(2026, 4, 23),
+                name="San Jorge",
+                source=OfficialHoliday.Source.BOE_NATIONAL_SYNC,
+            ).exists()
+        )
+        self.assertTrue(settings_state.official_holidays_non_working)
+        self.assertEqual(settings_state.last_boe_sync_year, 2026)
+        self.assertEqual(settings_state.last_boe_sync_resolution_identifier, "BOE-A-2025-21667")
+        self.assertEqual(settings_state.last_boe_sync_failure_message, "Fallo temporal")
+
+        resolved_day = DayAvailabilityResolver.resolve_for_global_agenda(date(2026, 4, 23))
+        self.assertFalse(resolved_day.is_working_day)
+        self.assertEqual(resolved_day.status, DayAvailabilityResolver.OFFICIAL_HOLIDAY)
+        self.assertEqual(resolved_day.label, "San Jorge")
+
+        app_user = get_user_model().objects.create_user(
+            username="agenda-reset-review",
+            password="agenda-pass-123",
+            is_staff=True,
+            is_superuser=True,
+        )
+        self.client.force_login(app_user)
+        response = self.client.get(
+            reverse("core:app_entrypoint"),
+            {"year": 2026, "month": 4, "day": 23},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="agenda-day agenda-day--selected agenda-day--official-holiday"')
+        self.assertContains(response, 'class="agenda-day__state agenda-day__state--official-holiday"')
+        self.assertContains(response, ">San Jorge<")
